@@ -1,0 +1,12 @@
+﻿name = "bkpos-revenue-cloud"
+main = "worker.js"
+compatibility_date = "2026-05-20"
+workers_dev = true
+
+[vars]
+DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bkpos-revenue-cloud"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"

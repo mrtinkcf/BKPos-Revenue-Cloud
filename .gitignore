@@ -1,0 +1,30 @@
+﻿# Build output
+bin/
+obj/
+artifacts/
+Artifacts/
+.tmp/
+
+# Local publish output. Keep explicit release artifacts outside git unless intentionally added.
+publish/
+
+# Apple signing secrets - never commit
+*.p12
+*.mobileprovision
+AuthKey_*.p8
+*.ipa
+*.xcarchive
+
+# User/local settings
+*.user
+*.suo
+.vs/
+.idea/
+
+# Logs
+*.log
+.claude/
+.codex/
+.vscode/
+Thumbs.db
+desktop.ini

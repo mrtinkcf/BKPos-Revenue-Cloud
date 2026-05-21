@@ -1,0 +1,148 @@
+﻿name: Build iOS Revenue App to TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Upload IPA to TestFlight"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    branches:
+      - main
+    paths:
+      - "BKPos.Revenue.App/**"
+      - ".github/workflows/ios-revenue-testflight.yml"
+      - "Directory.Build.props"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  PROJECT_PATH: "BKPos.Revenue.App/BKPos.Revenue.App.csproj"
+  IPA_OUTPUT_DIR: "artifacts/ios"
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      KEYCHAIN_PATH: "${{ runner.temp }}/bkpos-ios-signing.keychain-db"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install MAUI iOS workload
+        run: dotnet workload install maui-ios
+
+      - name: Restore
+        run: dotnet restore "${{ env.PROJECT_PATH }}"
+
+      - name: Prepare Apple signing assets
+        env:
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_CERTIFICATE_P12_BASE64:-}" ] || [ -z "${IOS_CERTIFICATE_PASSWORD:-}" ] || [ -z "${IOS_PROVISIONING_PROFILE_BASE64:-}" ] || [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
+            echo "Missing iOS signing secrets. Configure IOS_CERTIFICATE_P12_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_PROVISIONING_PROFILE_BASE64, IOS_KEYCHAIN_PASSWORD."
+            exit 1
+          fi
+
+          CERT_PATH="${RUNNER_TEMP}/bkpos-ios-cert.p12"
+          PROFILE_PATH="${RUNNER_TEMP}/bkpos-ios.mobileprovision"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+          security import "$CERT_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security list-keychain -d user -s "${KEYCHAIN_PATH}" login.keychain-db
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< "$(security cms -D -i "$PROFILE_PATH")")
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+          echo "Installed provisioning profile ${PROFILE_UUID}."
+
+      - name: Publish iOS IPA
+        env:
+          IOS_CODESIGN_KEY: ${{ secrets.IOS_CODESIGN_KEY }}
+          IOS_CODESIGN_PROVISION: ${{ secrets.IOS_CODESIGN_PROVISION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_CODESIGN_KEY:-}" ] || [ -z "${IOS_CODESIGN_PROVISION:-}" ]; then
+            echo "Missing IOS_CODESIGN_KEY or IOS_CODESIGN_PROVISION secrets."
+            exit 1
+          fi
+
+          dotnet publish "${PROJECT_PATH}" \
+            -f net10.0-ios \
+            -c Release \
+            -p:RuntimeIdentifier=ios-arm64 \
+            -p:ArchiveOnBuild=true \
+            -p:BuildIpa=true \
+            -p:CodesignKey="${IOS_CODESIGN_KEY}" \
+            -p:CodesignProvision="${IOS_CODESIGN_PROVISION}"
+
+          mkdir -p "${IPA_OUTPUT_DIR}"
+          IPA_PATH=$(find BKPos.Revenue.App/bin/Release/net10.0-ios -name "*.ipa" -type f | head -n 1)
+          if [ -z "${IPA_PATH}" ]; then
+            echo "IPA was not generated."
+            exit 1
+          fi
+          cp "$IPA_PATH" "${IPA_OUTPUT_DIR}/BKPos.Revenue.App.ipa"
+          echo "IPA copied to ${IPA_OUTPUT_DIR}/BKPos.Revenue.App.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BKPos.Revenue.App-iOS-IPA
+          path: ${{ env.IPA_OUTPUT_DIR }}/BKPos.Revenue.App.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to TestFlight
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight == 'true' }}
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPSTORE_API_KEY_ID:-}" ] || [ -z "${APPSTORE_ISSUER_ID:-}" ] || [ -z "${APPSTORE_API_KEY_BASE64:-}" ]; then
+            echo "Missing App Store Connect secrets."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/private_keys"
+          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${IPA_OUTPUT_DIR}/BKPos.Revenue.App.ipa" \
+            --apiKey "${APPSTORE_API_KEY_ID}" \
+            --apiIssuer "${APPSTORE_ISSUER_ID}"
+
+      - name: Cleanup signing assets
+        if: always()
+        run: |
+          security delete-keychain "${KEYCHAIN_PATH}" 2>/dev/null || true
+          rm -rf "$HOME/private_keys/AuthKey_"*.p8 2>/dev/null || true
