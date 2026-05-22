@@ -33,7 +33,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     env:
-      KEYCHAIN_PATH: "${{ runner.temp }}/bkpos-ios-signing.keychain-db"
+      KEYCHAIN_PATH: "/tmp/bkpos-ios-signing.keychain-db"
 
     steps:
       - name: Checkout source
