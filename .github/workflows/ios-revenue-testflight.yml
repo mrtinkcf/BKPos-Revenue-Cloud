@@ -30,7 +30,7 @@ env:
 jobs:
   build-ios:
     name: Build iOS IPA
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       KEYCHAIN_PATH: "/tmp/bkpos-ios-signing.keychain-db"
@@ -43,6 +43,20 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Select Xcode 26.5
+        run: |
+          set -euo pipefail
+          if [ -d "/Applications/Xcode_26.5.0.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_26.5.0.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode_26.5.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_26.5.app/Contents/Developer"
+          else
+            echo "Xcode 26.5 is required but not installed on this runner."
+            ls -1 /Applications | grep -i Xcode || true
+            exit 1
+          fi
+          xcodebuild -version
 
       - name: Install MAUI iOS workload
         run: dotnet workload install maui-ios
