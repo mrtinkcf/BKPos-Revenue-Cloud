@@ -44,16 +44,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Select stable Xcode 26.5
+      - name: Select Xcode 26.5 toolchain
         run: |
           set -euo pipefail
 
           SELECTED_DEVELOPER=""
-          for app in /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
+          for app in /Applications/Xcode_26.5_beta_2.app /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
             [ -d "$app" ] || continue
-            case "$app" in
-              *[Bb]eta*) echo "Skipping beta Xcode: $app"; continue ;;
-            esac
             developer="$app/Contents/Developer"
             [ -x "$developer/usr/bin/xcodebuild" ] || continue
             version="$(DEVELOPER_DIR="$developer" "$developer/usr/bin/xcodebuild" -version | head -n 1 || true)"
