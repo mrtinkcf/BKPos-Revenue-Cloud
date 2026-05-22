@@ -192,7 +192,7 @@ jobs:
             ],
             "info": { "version": 1, "author": "xcode" }
           }
-JSON
+          JSON
 
           xcrun actool "${ASSET_ROOT}" \
             --compile "${COMPILED_ASSETS}" \
