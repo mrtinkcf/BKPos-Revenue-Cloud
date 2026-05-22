@@ -28,8 +28,37 @@
 	</array>
 	<key>CFBundleIconName</key>
 	<string>appicon</string>
-	<key>XSAppIconAssets</key>
-	<string>Assets.xcassets/appicon.appiconset</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>Icon-20</string>
+				<string>Icon-29</string>
+				<string>Icon-40</string>
+				<string>Icon-60</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>appicon</string>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>Icon-20</string>
+				<string>Icon-29</string>
+				<string>Icon-40</string>
+				<string>Icon-76</string>
+				<string>Icon-83.5</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>appicon</string>
+		</dict>
+	</dict>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 </dict>
