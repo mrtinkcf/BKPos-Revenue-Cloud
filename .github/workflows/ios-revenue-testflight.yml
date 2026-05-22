@@ -49,29 +49,37 @@ jobs:
           set -euo pipefail
 
           SELECTED_DEVELOPER=""
-          for app in /Applications/Xcode.app /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode_*.app; do
+          for app in /Applications/Xcode_26.5_beta_2.app /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
             [ -d "$app" ] || continue
             developer="$app/Contents/Developer"
             [ -x "$developer/usr/bin/xcodebuild" ] || continue
-            version="$("$developer/usr/bin/xcodebuild" -version | head -n 1 || true)"
+            version="$(DEVELOPER_DIR="$developer" "$developer/usr/bin/xcodebuild" -version | head -n 1 || true)"
             macos_sdk="$developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-            actool="$developer/usr/bin/actool"
             echo "Candidate: $app -> $version"
-            if echo "$version" | grep -q "Xcode 26.5" && [ -d "$macos_sdk" ] && [ -x "$actool" ]; then
+            if echo "$version" | grep -q "Xcode 26.5" \
+              && [ -d "$macos_sdk" ] \
+              && DEVELOPER_DIR="$developer" xcrun --sdk macosx --find clang >/dev/null 2>&1 \
+              && DEVELOPER_DIR="$developer" xcrun --find ibtool >/dev/null 2>&1 \
+              && DEVELOPER_DIR="$developer" xcrun --find actool >/dev/null 2>&1; then
               SELECTED_DEVELOPER="$developer"
               break
             fi
           done
 
           if [ -z "$SELECTED_DEVELOPER" ]; then
-            echo "Xcode 26.5 with actool and MacOSX.sdk is required but was not found."
+            echo "Xcode 26.5 with clang, ibtool, actool and MacOSX.sdk is required but was not found."
             echo "Installed Xcode apps:"
             ls -1 /Applications | grep -i Xcode || true
             exit 1
           fi
 
           sudo xcode-select -s "$SELECTED_DEVELOPER"
+          export DEVELOPER_DIR="$SELECTED_DEVELOPER"
+          echo "DEVELOPER_DIR=$SELECTED_DEVELOPER" >> "$GITHUB_ENV"
+          xcrun -k
           xcodebuild -version
+          xcrun --sdk macosx --find clang
+          xcrun --find ibtool
           xcrun --find actool
           xcodebuild -showsdks
 
