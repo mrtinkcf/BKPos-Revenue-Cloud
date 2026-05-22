@@ -149,6 +149,81 @@ jobs:
             echo "IPA was not generated."
             exit 1
           fi
+
+          POSTPROCESS_DIR="${RUNNER_TEMP}/bkpos-revenue-ipa"
+          ASSET_ROOT="${RUNNER_TEMP}/bkpos-revenue-assets/Assets.xcassets"
+          APPICON_DIR="${ASSET_ROOT}/appicon.appiconset"
+          COMPILED_ASSETS="${RUNNER_TEMP}/bkpos-revenue-compiled-assets"
+          PARTIAL_INFO="${RUNNER_TEMP}/bkpos-revenue-asset-info.plist"
+          ENTITLEMENTS_PATH="${RUNNER_TEMP}/bkpos-revenue-entitlements.plist"
+          PATCHED_IPA="${RUNNER_TEMP}/BKPos.Revenue.App.patched.ipa"
+
+          rm -rf "${POSTPROCESS_DIR}" "${ASSET_ROOT}" "${COMPILED_ASSETS}" "${PATCHED_IPA}"
+          mkdir -p "${POSTPROCESS_DIR}" "${APPICON_DIR}" "${COMPILED_ASSETS}"
+          unzip -q "${IPA_PATH}" -d "${POSTPROCESS_DIR}"
+          APP_DIR=$(find "${POSTPROCESS_DIR}/Payload" -maxdepth 1 -name "*.app" -type d | head -n 1)
+          if [ -z "${APP_DIR}" ]; then
+            echo "Unable to locate app bundle inside IPA."
+            exit 1
+          fi
+
+          cp BKPos.Revenue.App/Platforms/iOS/Icons/*.png "${APPICON_DIR}/"
+          cat > "${APPICON_DIR}/Contents.json" <<'JSON'
+          {
+            "images": [
+              { "idiom": "iphone", "size": "20x20", "scale": "2x", "filename": "Icon-20@2x.png" },
+              { "idiom": "iphone", "size": "20x20", "scale": "3x", "filename": "Icon-20@3x.png" },
+              { "idiom": "iphone", "size": "29x29", "scale": "2x", "filename": "Icon-29@2x.png" },
+              { "idiom": "iphone", "size": "29x29", "scale": "3x", "filename": "Icon-29@3x.png" },
+              { "idiom": "iphone", "size": "40x40", "scale": "2x", "filename": "Icon-40@2x.png" },
+              { "idiom": "iphone", "size": "40x40", "scale": "3x", "filename": "Icon-40@3x.png" },
+              { "idiom": "iphone", "size": "60x60", "scale": "2x", "filename": "Icon-60@2x.png" },
+              { "idiom": "iphone", "size": "60x60", "scale": "3x", "filename": "Icon-60@3x.png" },
+              { "idiom": "ipad", "size": "20x20", "scale": "1x", "filename": "Icon-20.png" },
+              { "idiom": "ipad", "size": "20x20", "scale": "2x", "filename": "Icon-20@2x.png" },
+              { "idiom": "ipad", "size": "29x29", "scale": "1x", "filename": "Icon-29.png" },
+              { "idiom": "ipad", "size": "29x29", "scale": "2x", "filename": "Icon-29@2x.png" },
+              { "idiom": "ipad", "size": "40x40", "scale": "1x", "filename": "Icon-40.png" },
+              { "idiom": "ipad", "size": "40x40", "scale": "2x", "filename": "Icon-40@2x.png" },
+              { "idiom": "ipad", "size": "76x76", "scale": "1x", "filename": "Icon-76.png" },
+              { "idiom": "ipad", "size": "76x76", "scale": "2x", "filename": "Icon-76@2x.png" },
+              { "idiom": "ipad", "size": "83.5x83.5", "scale": "2x", "filename": "Icon-83.5@2x.png" },
+              { "idiom": "ios-marketing", "size": "1024x1024", "scale": "1x", "filename": "Icon-1024.png" }
+            ],
+            "info": { "version": 1, "author": "xcode" }
+          }
+JSON
+
+          xcrun actool "${ASSET_ROOT}" \
+            --compile "${COMPILED_ASSETS}" \
+            --platform iphoneos \
+            --minimum-deployment-target 15.0 \
+            --target-device iphone \
+            --target-device ipad \
+            --app-icon appicon \
+            --output-partial-info-plist "${PARTIAL_INFO}"
+
+          if [ ! -f "${COMPILED_ASSETS}/Assets.car" ]; then
+            echo "Assets.car was not generated."
+            exit 1
+          fi
+          cp "${COMPILED_ASSETS}/Assets.car" "${APP_DIR}/Assets.car"
+
+          /usr/libexec/PlistBuddy -c "Delete CFBundleIconName" "${APP_DIR}/Info.plist" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add CFBundleIconName string appicon" "${APP_DIR}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete UIRequiresFullScreen" "${APP_DIR}/Info.plist" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add UIRequiresFullScreen bool true" "${APP_DIR}/Info.plist"
+
+          /usr/bin/codesign -d --entitlements :- "${APP_DIR}" > "${ENTITLEMENTS_PATH}" 2>/dev/null || true
+          if [ -s "${ENTITLEMENTS_PATH}" ]; then
+            /usr/bin/codesign --force --sign "${IOS_CODESIGN_KEY}" --entitlements "${ENTITLEMENTS_PATH}" --timestamp=none "${APP_DIR}"
+          else
+            /usr/bin/codesign --force --sign "${IOS_CODESIGN_KEY}" --timestamp=none "${APP_DIR}"
+          fi
+
+          (cd "${POSTPROCESS_DIR}" && zip -qry "${PATCHED_IPA}" Payload)
+          IPA_PATH="${PATCHED_IPA}"
+
           cp "$IPA_PATH" "${IPA_OUTPUT_DIR}/BKPos.Revenue.App.ipa"
           echo "IPA copied to ${IPA_OUTPUT_DIR}/BKPos.Revenue.App.ipa"
 
