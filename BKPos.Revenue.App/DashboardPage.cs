@@ -47,10 +47,10 @@ public sealed class DashboardPage : ContentPage
         _api = api;
         _session = session;
         _services = services;
-        _lineChart = new GraphicsView { Drawable = _lineDrawable, HeightRequest = 150 };
-        _pieChart = new GraphicsView { Drawable = _pieDrawable, HeightRequest = 150 };
+        _lineChart = new GraphicsView { Drawable = _lineDrawable, HeightRequest = AppUi.ChartHeight };
+        _pieChart = new GraphicsView { Drawable = _pieDrawable, HeightRequest = AppUi.ChartHeight };
         Title = "Doanh thu";
-        BackgroundColor = AppColors.Surface;
+        BackgroundColor = AppColors.Navy;
         Microsoft.Maui.Controls.NavigationPage.SetHasNavigationBar(this, false);
         On<iOS>().SetUseSafeArea(true);
         _autoRefreshTimer = Dispatcher.CreateTimer();
@@ -98,8 +98,8 @@ public sealed class DashboardPage : ContentPage
         {
             Content = new VerticalStackLayout
             {
-                Padding = new Thickness(12),
-                Spacing = 12,
+                Padding = new Thickness(AppUi.S(12)),
+                Spacing = AppUi.S(12),
                 Children =
                 {
                     _offlineBanner,
@@ -153,7 +153,7 @@ public sealed class DashboardPage : ContentPage
 
         return new Grid
         {
-            Padding = new Thickness(14, 12),
+            Padding = new Thickness(AppUi.S(14), AppUi.S(12)),
             BackgroundColor = AppColors.Navy,
             ColumnSpacing = 8,
             ColumnDefinitions =
@@ -558,7 +558,7 @@ public sealed class DashboardPage : ContentPage
             Stroke = Color.FromArgb("#E2E8F0"),
             StrokeShape = new RoundRectangle { CornerRadius = 12 },
             BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(12, 9),
+            Padding = new Thickness(14, 13),
             Content = new Grid
             {
                 ColumnDefinitions =
@@ -600,7 +600,7 @@ public sealed class DashboardPage : ContentPage
         => new() { FontSize = size, FontAttributes = FontAttributes.Bold, TextColor = color, LineBreakMode = LineBreakMode.NoWrap };
 
     private static Button IconButton(string text, Color color)
-        => new() { Text = text, BackgroundColor = color, TextColor = Colors.White, CornerRadius = 12, HeightRequest = 40, Padding = new Thickness(12, 0), FontSize = 13, FontAttributes = FontAttributes.Bold };
+        => new() { Text = text, BackgroundColor = color, TextColor = Colors.White, CornerRadius = 12, HeightRequest = AppUi.S(50), Padding = new Thickness(AppUi.S(14), 0), FontSize = AppUi.S(13), FontAttributes = FontAttributes.Bold };
 
     internal static string PaymentLabelForChart(string method) => PaymentLabel(method);
 

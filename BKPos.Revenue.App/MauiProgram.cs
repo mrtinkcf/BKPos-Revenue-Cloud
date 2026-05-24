@@ -27,6 +27,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<RevenueApiClient>();
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<DashboardPage>();
+        builder.Services.AddTransient<SettingsPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();

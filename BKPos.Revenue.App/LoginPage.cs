@@ -1,9 +1,9 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Controls.Shapes;
 using Microsoft.Maui.Controls.PlatformConfiguration;
 using Microsoft.Maui.Controls.PlatformConfiguration.iOSSpecific;
 using MauiEntry = Microsoft.Maui.Controls.Entry;
-using MauiScrollView = Microsoft.Maui.Controls.ScrollView;
+using MauiNavigationPage = Microsoft.Maui.Controls.NavigationPage;
 
 namespace BKPos.Revenue.App;
 
@@ -12,21 +12,25 @@ public sealed class LoginPage : ContentPage
     private readonly RevenueApiClient _api;
     private readonly RevenueSessionStore _session;
     private readonly IServiceProvider _services;
-    private readonly MauiEntry _workerUrl = new() { Placeholder = "Revenue Cloud URL", Keyboard = Keyboard.Url, ReturnType = ReturnType.Next };
-    private readonly MauiEntry _tenantId = new() { Placeholder = "Tenant ID", ReturnType = ReturnType.Next };
     private readonly MauiEntry _username = new() { Placeholder = "Tên đăng nhập", ReturnType = ReturnType.Next };
     private readonly MauiEntry _password = new() { Placeholder = "Mật khẩu", IsPassword = true, ReturnType = ReturnType.Done };
-    private readonly Label _status = new() { TextColor = AppColors.Red, FontSize = 13 };
-    private readonly Button _loginButton = new() { Text = "Đăng nhập", BackgroundColor = AppColors.Blue, TextColor = Colors.White, CornerRadius = 14, HeightRequest = 50, FontAttributes = FontAttributes.Bold };
+    private readonly Label _status = new() { TextColor = AppColors.Red, LineBreakMode = LineBreakMode.WordWrap };
+    private readonly Button _loginButton = new()
+    {
+        Text = "Đăng nhập",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 14,
+        FontAttributes = FontAttributes.Bold
+    };
 
     public LoginPage(RevenueApiClient api, RevenueSessionStore session, IServiceProvider services)
     {
         _api = api;
         _session = session;
         _services = services;
-        Title = "BKPos Revenue";
         BackgroundColor = AppColors.Navy;
-        Microsoft.Maui.Controls.NavigationPage.SetHasNavigationBar(this, false);
+        MauiNavigationPage.SetHasNavigationBar(this, false);
         On<iOS>().SetUseSafeArea(true);
         Build();
         LoadSaved();
@@ -34,36 +38,77 @@ public sealed class LoginPage : ContentPage
 
     private void Build()
     {
+        _loginButton.HeightRequest = AppUi.S(52);
+        _loginButton.FontSize = AppUi.S(16);
+        _status.FontSize = AppUi.S(13);
+
         _loginButton.Clicked += async (_, _) => await LoginAsync();
         _password.Completed += async (_, _) => await LoginAsync();
 
-        var header = new VerticalStackLayout
+        // Settings gear — top-right
+        var settingsButton = new Button
         {
-            Spacing = 6,
+            Text = "⚙",
+            BackgroundColor = Colors.Transparent,
+            TextColor = Color.FromArgb("#94A3B8"),
+            FontSize = AppUi.S(24),
+            HeightRequest = 44,
+            WidthRequest = 44,
+            Padding = Thickness.Zero
+        };
+        settingsButton.Clicked += async (_, _) =>
+        {
+            var page = _services.GetRequiredService<SettingsPage>();
+            await Navigation.PushModalAsync(new MauiNavigationPage(page)
+            {
+                BarBackgroundColor = Colors.White,
+                BarTextColor = AppColors.Navy
+            });
+        };
+        Grid.SetColumn(settingsButton, 1);
+
+        // Branding — font sizes scale with screen
+        var branding = new VerticalStackLayout
+        {
+            Spacing = AppUi.IsSmallScreen ? 2 : 4,
+            VerticalOptions = LayoutOptions.Center,
             Children =
             {
-                new Label { Text = "BKPos", TextColor = Colors.White, FontSize = 36, FontAttributes = FontAttributes.Bold },
-                new Label { Text = "Revenue Cloud", TextColor = Color.FromArgb("#93C5FD"), FontSize = 18, FontAttributes = FontAttributes.Bold },
-                new Label { Text = "Theo dõi doanh thu mọi lúc, mọi nơi", TextColor = Color.FromArgb("#CBD5E1"), FontSize = 14 }
+                new Label { Text = "BKPos", TextColor = Colors.White, FontSize = AppUi.S(AppUi.IsSmallScreen ? 28 : 34), FontAttributes = FontAttributes.Bold },
+                new Label { Text = "Revenue Cloud", TextColor = Color.FromArgb("#93C5FD"), FontSize = AppUi.S(AppUi.IsSmallScreen ? 15 : 17), FontAttributes = FontAttributes.Bold },
+                new Label { Text = "Theo dõi doanh thu mọi lúc, mọi nơi", TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(13) }
             }
         };
 
+        var headerRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            },
+            Padding = new Thickness(0, AppUi.S(6), 0, AppUi.IsSmallScreen ? 12 : 20),
+            Children = { branding, settingsButton }
+        };
+
+        // Login card — username + password only
         var card = new Border
         {
-            Stroke = Color.FromArgb("#D8E1EC"),
-            StrokeShape = new RoundRectangle { CornerRadius = 26 },
+            Stroke = Color.FromArgb("#1E3A5F"),
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(24) },
             BackgroundColor = Colors.White,
-            Padding = new Thickness(18),
+            Padding = AppUi.CardPadding,
             Content = new VerticalStackLayout
             {
-                Spacing = 12,
+                Spacing = AppUi.CardSpacing,
                 Children =
                 {
-                    new Label { Text = "Đăng nhập", FontSize = 22, FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy },
-                    Field(_workerUrl),
-                    Field(_tenantId),
+                    new Label { Text = "Đăng nhập", FontSize = AppUi.S(22), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy },
+                    FieldLabel("Tên đăng nhập"),
                     Field(_username),
+                    FieldLabel("Mật khẩu"),
                     Field(_password),
+                    new BoxView { HeightRequest = AppUi.IsSmallScreen ? 0 : 4, Color = Colors.Transparent },
                     _loginButton,
                     _status
                 }
@@ -72,75 +117,82 @@ public sealed class LoginPage : ContentPage
 
         var footer = new Label
         {
-            Text = "Bảo Khang Laptop - Phone/Zalo: 0396 529 103",
-            TextColor = Color.FromArgb("#CBD5E1"),
-            FontSize = 12,
+            Text = "Bảo Khang Laptop  •  0396 529 103",
+            TextColor = Color.FromArgb("#475569"),
+            FontSize = AppUi.S(12),
             HorizontalTextAlignment = TextAlignment.Center
         };
 
-        var formScroll = new MauiScrollView
+        var cardHost = new VerticalStackLayout
         {
-            Content = new VerticalStackLayout
-            {
-                VerticalOptions = LayoutOptions.Center,
-                Spacing = 18,
-                Children = { card }
-            }
+            VerticalOptions = LayoutOptions.Center,
+            Children = { card }
         };
-        Grid.SetRow(formScroll, 1);
+        Grid.SetRow(cardHost, 1);
 
-        var footerHost = new Grid { Children = { footer } };
+        var footerHost = new ContentView
+        {
+            Padding = new Thickness(0, AppUi.S(12), 0, 0),
+            Content = footer
+        };
         Grid.SetRow(footerHost, 2);
 
         Content = new Grid
         {
-            Padding = new Thickness(18, 22),
+            Padding = AppUi.PagePadding,
             RowDefinitions =
             {
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Star),
                 new RowDefinition(GridLength.Auto)
             },
-            Children =
-            {
-                header,
-                formScroll,
-                footerHost
-            }
+            Children = { headerRow, cardHost, footerHost }
         };
     }
 
+    private static Label FieldLabel(string text)
+        => new()
+        {
+            Text = text,
+            TextColor = AppColors.Muted,
+            FontSize = AppUi.S(12),
+            FontAttributes = FontAttributes.Bold,
+            Margin = new Thickness(4, 0, 0, -6)
+        };
+
     private static Border Field(MauiEntry entry)
     {
-        entry.HeightRequest = 46;
-        entry.FontSize = 15;
+        entry.HeightRequest = AppUi.S(48);
+        entry.FontSize = AppUi.S(16);
         entry.TextColor = AppColors.Navy;
         entry.PlaceholderColor = AppColors.Muted;
         entry.BackgroundColor = Colors.Transparent;
         return new Border
         {
             Stroke = Color.FromArgb("#D8E1EC"),
-            StrokeShape = new RoundRectangle { CornerRadius = 14 },
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(12) },
             BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(12, 0),
+            Padding = new Thickness(AppUi.S(14), 0),
             Content = entry
         };
     }
 
     private void LoadSaved()
     {
-        _workerUrl.Text = _session.WorkerUrl;
-        _tenantId.Text = _session.TenantId;
         _username.Text = _session.Username;
     }
 
     private async Task LoginAsync()
     {
-        if (string.IsNullOrWhiteSpace(_workerUrl.Text)
-            || string.IsNullOrWhiteSpace(_tenantId.Text)
-            || string.IsNullOrWhiteSpace(_username.Text))
+        if (string.IsNullOrWhiteSpace(_session.WorkerUrl) || string.IsNullOrWhiteSpace(_session.TenantId))
         {
-            _status.Text = "Vui lòng nhập Revenue Cloud URL, Tenant ID và tài khoản.";
+            _status.Text = "Chưa cấu hình kết nối. Nhấn ⚙ để nhập URL và Tenant ID.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_username.Text))
+        {
+            _status.Text = "Vui lòng nhập tên đăng nhập.";
             return;
         }
 
@@ -149,7 +201,7 @@ public sealed class LoginPage : ContentPage
             _loginButton.IsEnabled = false;
             _status.TextColor = AppColors.Muted;
             _status.Text = "Đang đăng nhập...";
-            await _api.LoginAsync(_workerUrl.Text, _tenantId.Text, _username.Text, _password.Text ?? string.Empty);
+            await _api.LoginAsync(_session.WorkerUrl, _session.TenantId, _username.Text, _password.Text ?? string.Empty);
             _status.Text = string.Empty;
             await Navigation.PushAsync(_services.GetRequiredService<DashboardPage>());
             Navigation.RemovePage(this);
@@ -165,5 +217,3 @@ public sealed class LoginPage : ContentPage
         }
     }
 }
-
-
