@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -23,9 +23,9 @@ public sealed class RevenueApiClient
 
     public async Task<LoginResponse> LoginAsync(string workerUrl, string tenantId, string username, string password, CancellationToken cancellationToken = default)
     {
-        _session.WorkerUrl = workerUrl;
-        _session.TenantId = tenantId;
-        _session.Username = username;
+        _session.WorkerUrl = workerUrl.Trim().TrimEnd('/');
+        _session.TenantId = tenantId.Trim();
+        _session.Username = username.Trim();
         var response = await PostAsync<LoginResponse>("/auth/login", new
         {
             tenantId = tenantId.Trim(),
@@ -127,9 +127,6 @@ public sealed class RevenueApiClient
         CacheStatus = new RevenueCacheStatus(true, isStale, cachedAt);
     }
 
-    private Task<T> GetAsync<T>(string path, bool authenticated, CancellationToken cancellationToken)
-        => SendAsync<T>(HttpMethod.Get, path, null, authenticated, cancellationToken);
-
     private Task<T> PostAsync<T>(string path, object body, bool authenticated, CancellationToken cancellationToken)
         => SendAsync<T>(HttpMethod.Post, path, JsonContent.Create(body, options: JsonOptions), authenticated, cancellationToken);
 
@@ -169,7 +166,7 @@ public sealed class RevenueApiClient
         var root = _session.WorkerUrl;
         if (string.IsNullOrWhiteSpace(root))
         {
-            throw new InvalidOperationException("Chưa cấu hình Revenue Cloud Worker URL.");
+            throw new InvalidOperationException("Chưa cấu hình Revenue Cloud URL.");
         }
 
         return new Uri(root.Trim().TrimEnd('/') + path, UriKind.Absolute);
@@ -180,6 +177,10 @@ public sealed class RevenueApiClient
         try
         {
             using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var message) && !string.IsNullOrWhiteSpace(message.GetString()))
+            {
+                return message.GetString()!;
+            }
             if (doc.RootElement.TryGetProperty("error", out var error))
             {
                 return error.GetString() ?? $"HTTP {(int)statusCode}";
