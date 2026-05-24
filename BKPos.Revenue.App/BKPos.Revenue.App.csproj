@@ -12,7 +12,7 @@
     <ApplicationTitle>BKPos Revenue</ApplicationTitle>
     <ApplicationId>vn.baokhang.bkpos.revenue</ApplicationId>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>3</ApplicationVersion>
+    <ApplicationVersion>4</ApplicationVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
     <TargetPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">36.0</TargetPlatformVersion>
@@ -27,6 +27,7 @@
 
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <BundleResource Include="Platforms\iOS\Icons\*.png" Link="%(Filename)%(Extension)" />
+    <BundleResource Include="Platforms\iOS\LaunchScreen.storyboard" />
   </ItemGroup>
 
   <ItemGroup>
