@@ -190,6 +190,13 @@ public sealed class LoginPage : ContentPage
             return;
         }
 
+        if (!Uri.TryCreate(_session.WorkerUrl, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            _status.Text = "URL Revenue Cloud không hợp lệ. Nhấn ⚙ để kiểm tra lại cấu hình.";
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_username.Text))
         {
             _status.Text = "Vui lòng nhập tên đăng nhập.";

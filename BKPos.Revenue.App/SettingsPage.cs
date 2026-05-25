@@ -158,7 +158,16 @@ public sealed class SettingsPage : ContentPage
             return;
         }
 
-        _session.WorkerUrl = url;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            _status.TextColor = AppColors.Red;
+            _status.Text = "Revenue Cloud URL phải bắt đầu bằng https:// hoặc http://.";
+            _status.IsVisible = true;
+            return;
+        }
+
+        _session.WorkerUrl = uri.ToString().TrimEnd('/');
         _session.TenantId = tid;
         _status.TextColor = AppColors.Green;
         _status.Text = "Đã lưu thành công!";

@@ -1,31 +1,34 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Maui.Controls.Shapes;
 using Microsoft.Maui.Controls.PlatformConfiguration;
 using Microsoft.Maui.Controls.PlatformConfiguration.iOSSpecific;
 using MauiPicker = Microsoft.Maui.Controls.Picker;
 using MauiDatePicker = Microsoft.Maui.Controls.DatePicker;
 using MauiScrollView = Microsoft.Maui.Controls.ScrollView;
+using MauiNavigationPage = Microsoft.Maui.Controls.NavigationPage;
 
 namespace BKPos.Revenue.App;
 
 public sealed class DashboardPage : ContentPage
 {
+    // ── dependencies ─────────────────────────────────────────────────────
     private readonly RevenueApiClient _api;
     private readonly RevenueSessionStore _session;
     private readonly IServiceProvider _services;
-    private readonly MauiPicker _storePicker = new() { Title = "Chọn cửa hàng", TextColor = AppColors.Navy, FontSize = 13 };
-    private readonly MauiDatePicker _datePicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = 13 };
-    private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = 13 };
-    private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = 13 };
-    private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(12, 8), IsVisible = false, FontSize = 13 };
-    private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#CBD5E1"), FontSize = 12 };
-    private readonly Label _revenue = ValueLabel(30, AppColors.Blue);
-    private readonly Label _invoiceCount = ValueLabel(22, AppColors.Navy);
-    private readonly Label _avg = ValueLabel(22, AppColors.Navy);
-    private readonly Label _cancelled = ValueLabel(22, AppColors.Red);
-    private readonly Label _rangeRevenue = ValueLabel(22, AppColors.Blue);
-    private readonly Label _rangeInvoices = new() { FontSize = 14, FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy };
-    private readonly Label _rangePayments = new() { FontSize = 13, TextColor = AppColors.Muted };
+
+    // ── data controls (kept for existing Render* / Load* methods) ────────
+    private readonly MauiDatePicker _datePicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
+    private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
+    private readonly Label _revenue = ValueLabel(AppUi.S(28), AppColors.Blue);
+    private readonly Label _invoiceCount = ValueLabel(AppUi.S(22), AppColors.Navy);
+    private readonly Label _avg = ValueLabel(AppUi.S(22), AppColors.Navy);
+    private readonly Label _cancelled = ValueLabel(AppUi.S(22), AppColors.Red);
+    private readonly Label _rangeRevenue = ValueLabel(AppUi.S(22), AppColors.Blue);
+    private readonly Label _rangeInvoices = new() { FontSize = AppUi.S(14), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy };
+    private readonly Label _rangePayments = new() { FontSize = AppUi.S(12), TextColor = AppColors.Muted, LineBreakMode = LineBreakMode.WordWrap };
     private readonly VerticalStackLayout _paymentPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _dailyPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _topPanel = new() { Spacing = 8 };
@@ -34,14 +37,59 @@ public sealed class DashboardPage : ContentPage
     private readonly PaymentPieDrawable _pieDrawable = new();
     private readonly GraphicsView _lineChart;
     private readonly GraphicsView _pieChart;
-    private readonly Button _refreshButton = IconButton("Làm mới", AppColors.Blue);
-    private readonly Button _logoutButton = IconButton("Thoát", AppColors.Red);
-    private readonly Button _rangeButton = IconButton("Xem báo cáo", AppColors.Blue);
+    private readonly Button _rangeButton = new()
+    {
+        Text = "Xem báo cáo",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 12,
+        HeightRequest = AppUi.S(46),
+        FontSize = AppUi.S(14),
+        FontAttributes = FontAttributes.Bold
+    };
     private readonly RefreshView _refreshView = new();
     private readonly IDispatcherTimer? _autoRefreshTimer;
     private bool _loading;
     private List<StoreDto> _stores = [];
 
+    // ── header action buttons ─────────────────────────────────────────────
+    private readonly Button _refreshButton = new()
+    {
+        Text = "⟳",
+        BackgroundColor = Colors.Transparent,
+        TextColor = Colors.White,
+        FontSize = AppUi.S(22),
+        HeightRequest = 44,
+        WidthRequest = 44,
+        Padding = Thickness.Zero
+    };
+    private readonly Button _logoutButton = new()
+    {
+        Text = "↩",
+        BackgroundColor = Colors.Transparent,
+        TextColor = Color.FromArgb("#94A3B8"),
+        FontSize = AppUi.S(20),
+        HeightRequest = 44,
+        WidthRequest = 44,
+        Padding = Thickness.Zero
+    };
+
+    // ── tab navigation ────────────────────────────────────────────────────
+    private enum Tab { Home, Tables, Invoices, TopProducts }
+    private Tab _activeTab = Tab.Home;
+    private readonly Label _headerTitle = new() { TextColor = Colors.White, FontSize = AppUi.S(18), FontAttributes = FontAttributes.Bold };
+    private readonly Label[] _tabIconLabels = new Label[4];
+    private readonly Label[] _tabTextLabels = new Label[4];
+    private View? _homeView, _tablesView, _invoicesView, _topView;
+
+    private readonly Label _tableCountLabel = new() { Text = "–", FontSize = AppUi.S(32), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy };
+    private readonly Label _tableEstimatedLabel = ValueLabel(AppUi.S(22), AppColors.Blue);
+    private readonly VerticalStackLayout _tablesPanel = new() { Spacing = AppUi.S(10) };
+
+    private static readonly string[] TabTitles = ["Tổng quan", "Bàn phục vụ", "Hóa đơn", "Bán chạy"];
+    private static readonly string[] TabIconChars = ["📈", "🪑", "🧾", "⭐"];
+
+    // ─────────────────────────────────────────────────────────────────────
     public DashboardPage(RevenueApiClient api, RevenueSessionStore session, IServiceProvider services)
     {
         _api = api;
@@ -49,9 +97,8 @@ public sealed class DashboardPage : ContentPage
         _services = services;
         _lineChart = new GraphicsView { Drawable = _lineDrawable, HeightRequest = AppUi.ChartHeight };
         _pieChart = new GraphicsView { Drawable = _pieDrawable, HeightRequest = AppUi.ChartHeight };
-        Title = "Doanh thu";
-        BackgroundColor = AppColors.Navy;
-        Microsoft.Maui.Controls.NavigationPage.SetHasNavigationBar(this, false);
+        BackgroundColor = Colors.White;
+        MauiNavigationPage.SetHasNavigationBar(this, false);
         On<iOS>().SetUseSafeArea(true);
         _autoRefreshTimer = Dispatcher.CreateTimer();
         _autoRefreshTimer.Interval = TimeSpan.FromSeconds(60);
@@ -72,6 +119,7 @@ public sealed class DashboardPage : ContentPage
         base.OnDisappearing();
     }
 
+    // ── UI build ──────────────────────────────────────────────────────────
     private void Build()
     {
         _refreshButton.Clicked += async (_, _) => await LoadAsync();
@@ -85,121 +133,79 @@ public sealed class DashboardPage : ContentPage
             _toPicker.Date = date;
             await LoadReportsAsync();
         };
-        _storePicker.SelectedIndexChanged += async (_, _) =>
-        {
-            if (_storePicker.SelectedIndex >= 0 && _storePicker.SelectedIndex < _stores.Count)
-            {
-                _session.StoreId = _stores[_storePicker.SelectedIndex].StoreId;
-                await LoadReportsAsync();
-            }
-        };
 
-        _refreshView.Content = new MauiScrollView
-        {
-            Content = new VerticalStackLayout
-            {
-                Padding = new Thickness(AppUi.S(12)),
-                Spacing = AppUi.S(12),
-                Children =
-                {
-                    _offlineBanner,
-                    FilterCard(),
-                    SummaryGrid(),
-                    Section("Báo cáo khoảng ngày", RangeCard()),
-                    Section("Doanh thu 7 ngày", new VerticalStackLayout { Spacing = 10, Children = { _lineChart, _dailyPanel } }),
-                    Section("Phương thức thanh toán", new VerticalStackLayout { Spacing = 10, Children = { _pieChart, _paymentPanel } }),
-                    Section("Top sản phẩm", _topPanel),
-                    Section("Hóa đơn gần nhất", _invoicePanel)
-                }
-            }
-        };
+        _homeView    = BuildHomeView();
+        _tablesView  = BuildTablesView();
+        _invoicesView = BuildInvoicesView();
+        _topView     = BuildTopProductsView();
 
-        var contentHost = new Grid { Children = { _refreshView } };
-        Grid.SetRow(contentHost, 1);
+        var contentGrid = new Grid();
+        contentGrid.Children.Add(_homeView);
+        contentGrid.Children.Add(_tablesView);
+        contentGrid.Children.Add(_invoicesView);
+        contentGrid.Children.Add(_topView);
+        Grid.SetRow(contentGrid, 1);
+
+        var tabBar = BuildTabBar();
+        Grid.SetRow(tabBar, 2);
 
         Content = new Grid
         {
             RowDefinitions =
             {
                 new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Star)
+                new RowDefinition(GridLength.Star),
+                new RowDefinition(GridLength.Auto)
             },
-            Children =
-            {
-                Header(),
-                contentHost
-            }
+            Children = { BuildHeader(), contentGrid, tabBar }
         };
+
+        SwitchTab(Tab.Home);
     }
 
-    private View Header()
+    // ── header ────────────────────────────────────────────────────────────
+    private View BuildHeader()
     {
-        var titleBlock = new VerticalStackLayout
+        Grid.SetColumn(_refreshButton, 1);
+        Grid.SetColumn(_logoutButton, 2);
+
+        var titleRow = new Grid
         {
-            Spacing = 2,
-            Children =
-            {
-                new Label { Text = "BKPos Revenue", TextColor = Colors.White, FontSize = 20, FontAttributes = FontAttributes.Bold },
-                _syncStatus
-            }
-        };
-        Grid.SetColumn(titleBlock, 0);
-
-        var refreshHost = new Grid { Children = { _refreshButton } };
-        Grid.SetColumn(refreshHost, 1);
-
-        var logoutHost = new Grid { Children = { _logoutButton } };
-        Grid.SetColumn(logoutHost, 2);
-
-        return new Grid
-        {
-            Padding = new Thickness(AppUi.S(14), AppUi.S(12)),
-            BackgroundColor = AppColors.Navy,
-            ColumnSpacing = 8,
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
                 new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(GridLength.Auto)
             },
-            RowDefinitions =
-            {
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Auto)
-            },
-            Children =
-            {
-                titleBlock,
-                refreshHost,
-                logoutHost
-            }
+            ColumnSpacing = 4,
+            Children = { _headerTitle, _refreshButton, _logoutButton }
+        };
+
+        return new VerticalStackLayout
+        {
+            BackgroundColor = AppColors.Navy,
+            Padding = new Thickness(AppUi.S(14), AppUi.S(10), AppUi.S(14), AppUi.S(10)),
+            Spacing = AppUi.S(6),
+            Children = { _offlineBanner, titleRow, _syncStatus }
         };
     }
 
-    private View FilterCard()
+    // ── home tab ──────────────────────────────────────────────────────────
+    private View BuildHomeView()
     {
-        var grid = new Grid
+        var dateShell = new Border
         {
-            ColumnSpacing = 8,
-            RowSpacing = 8,
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Auto)
-            },
-            RowDefinitions = { new RowDefinition(GridLength.Auto) }
+            Stroke = Color.FromArgb("#D8E1EC"),
+            StrokeShape = new RoundRectangle { CornerRadius = 10 },
+            BackgroundColor = Color.FromArgb("#F8FAFC"),
+            Padding = new Thickness(AppUi.S(10), 0),
+            Content = _datePicker
         };
-        grid.Add(InputShell(_storePicker), 0, 0);
-        grid.Add(InputShell(_datePicker), 1, 0);
-        return Card(grid, 14);
-    }
 
-    private View RangeCard()
-    {
-        var grid = new Grid
+        var rangeGrid = new Grid
         {
-            ColumnSpacing = 8,
-            RowSpacing = 10,
+            ColumnSpacing = AppUi.S(8),
+            RowSpacing = AppUi.S(10),
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
@@ -212,32 +218,213 @@ public sealed class DashboardPage : ContentPage
                 new RowDefinition(GridLength.Auto)
             }
         };
-        grid.Add(InputShell(_fromPicker), 0, 0);
-        grid.Add(InputShell(_toPicker), 1, 0);
-        grid.Add(_rangeButton, 0, 1);
+        rangeGrid.Add(InputShell(_fromPicker), 0, 0);
+        rangeGrid.Add(InputShell(_toPicker), 1, 0);
+        rangeGrid.Add(_rangeButton, 0, 1);
         Grid.SetColumnSpan(_rangeButton, 2);
         var rangeSummary = new VerticalStackLayout
         {
-            Spacing = 5,
+            Spacing = 4,
             Children =
             {
-                new Label { Text = "Tổng doanh thu", TextColor = AppColors.Muted, FontSize = 12 },
-                _rangeRevenue,
-                _rangeInvoices,
-                _rangePayments
+                new Label { Text = "Tổng doanh thu", TextColor = AppColors.Muted, FontSize = AppUi.S(12) },
+                _rangeRevenue, _rangeInvoices, _rangePayments
             }
         };
-        grid.Add(rangeSummary, 0, 2);
+        rangeGrid.Add(rangeSummary, 0, 2);
         Grid.SetColumnSpan(rangeSummary, 2);
+
+        _refreshView.Content = new MauiScrollView
+        {
+            Content = new VerticalStackLayout
+            {
+                BackgroundColor = AppColors.Surface,
+                Padding = new Thickness(AppUi.S(12)),
+                Spacing = AppUi.S(12),
+                Children =
+                {
+                    dateShell,
+                    SummaryGrid(),
+                    Section("Báo cáo khoảng ngày", rangeGrid),
+                    Section("Doanh thu 7 ngày",
+                        new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _lineChart, _dailyPanel } }),
+                    Section("Phương thức thanh toán",
+                        new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _pieChart, _paymentPanel } })
+                }
+            }
+        };
+        return _refreshView;
+    }
+
+    // ── tables tab ────────────────────────────────────────────────────────
+    private View BuildTablesView()
+    {
+        var leftCol = new VerticalStackLayout
+        {
+            Spacing = 4,
+            Children =
+            {
+                new Label { Text = "Đang phục vụ", TextColor = AppColors.Muted, FontSize = AppUi.S(12) },
+                _tableCountLabel,
+                new Label { Text = "bàn", TextColor = AppColors.Muted, FontSize = AppUi.S(13) }
+            }
+        };
+        var rightCol = new VerticalStackLayout
+        {
+            Spacing = 4,
+            Children =
+            {
+                new Label { Text = "Doanh thu ước tính", TextColor = AppColors.Muted, FontSize = AppUi.S(12) },
+                _tableEstimatedLabel
+            }
+        };
+        Grid.SetColumn(rightCol, 1);
+
+        var statsGrid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            ColumnSpacing = AppUi.S(16),
+            Children = { leftCol, rightCol }
+        };
+
+        return new MauiScrollView
+        {
+            Content = new VerticalStackLayout
+            {
+                BackgroundColor = AppColors.Surface,
+                Padding = new Thickness(AppUi.S(12)),
+                Spacing = AppUi.S(12),
+                Children =
+                {
+                    Card(statsGrid, AppUi.S(16)),
+                    Section("Danh sách bàn", _tablesPanel)
+                }
+            }
+        };
+    }
+
+    // ── invoices tab ──────────────────────────────────────────────────────
+    private View BuildInvoicesView()
+    {
+        // V1: hóa đơn tự tải 7 ngày gần nhất theo hợp đồng hiện tại.
+        return new MauiScrollView
+        {
+            Content = new VerticalStackLayout
+            {
+                BackgroundColor = AppColors.Surface,
+                Padding = new Thickness(AppUi.S(12)),
+                Spacing = AppUi.S(12),
+                Children = { Section("Danh sách hóa đơn", _invoicePanel) }
+            }
+        };
+    }
+
+    // ── top-products tab ──────────────────────────────────────────────────
+    private View BuildTopProductsView()
+    {
+        // V1: bán chạy tự tải 7 ngày gần nhất theo hợp đồng hiện tại.
+        return new MauiScrollView
+        {
+            Content = new VerticalStackLayout
+            {
+                BackgroundColor = AppColors.Surface,
+                Padding = new Thickness(AppUi.S(12)),
+                Spacing = AppUi.S(12),
+                Children = { Section("Top món bán chạy", _topPanel) }
+            }
+        };
+    }
+
+    // ── tab bar ───────────────────────────────────────────────────────────
+    private View BuildTabBar()
+    {
+        var tabs = new[] { Tab.Home, Tab.Tables, Tab.Invoices, Tab.TopProducts };
+        var columns = Enumerable.Repeat(new ColumnDefinition(GridLength.Star), 4).ToList();
+
+        var grid = new Grid
+        {
+            BackgroundColor = Colors.White,
+            ColumnDefinitions = new ColumnDefinitionCollection(columns.ToArray())
+        };
+
+        // Top divider
+        var divider = new BoxView { Color = Color.FromArgb("#E2E8F0"), HeightRequest = 1, HorizontalOptions = LayoutOptions.Fill, VerticalOptions = LayoutOptions.Start };
+        Grid.SetColumnSpan(divider, 4);
+        grid.Children.Add(divider);
+
+        for (var i = 0; i < 4; i++)
+        {
+            var idx = i;
+            _tabIconLabels[i] = new Label
+            {
+                Text = TabIconChars[i],
+                FontSize = AppUi.S(24),
+                HorizontalTextAlignment = TextAlignment.Center,
+                HorizontalOptions = LayoutOptions.Center
+            };
+            _tabTextLabels[i] = new Label
+            {
+                Text = TabTitles[i],
+                FontSize = AppUi.S(10),
+                HorizontalTextAlignment = TextAlignment.Center,
+                HorizontalOptions = LayoutOptions.Center
+            };
+
+            var cell = new VerticalStackLayout
+            {
+                HorizontalOptions = LayoutOptions.Center,
+                VerticalOptions = LayoutOptions.Center,
+                Spacing = 2,
+                Padding = new Thickness(0, AppUi.S(8), 0, AppUi.S(6)),
+                Children = { _tabIconLabels[idx], _tabTextLabels[idx] }
+            };
+
+            var tapHost = new ContentView
+            {
+                HeightRequest = AppUi.S(60),
+                HorizontalOptions = LayoutOptions.Fill,
+                Content = cell
+            };
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += (_, _) => SwitchTab(tabs[idx]);
+            tapHost.GestureRecognizers.Add(tap);
+
+            Grid.SetColumn(tapHost, i);
+            grid.Children.Add(tapHost);
+        }
+
         return grid;
     }
 
+    private void SwitchTab(Tab tab)
+    {
+        _activeTab = tab;
+        _headerTitle.Text = TabTitles[(int)tab];
+
+        _homeView!.IsVisible    = tab == Tab.Home;
+        _tablesView!.IsVisible  = tab == Tab.Tables;
+        _invoicesView!.IsVisible = tab == Tab.Invoices;
+        _topView!.IsVisible     = tab == Tab.TopProducts;
+
+        for (var i = 0; i < 4; i++)
+        {
+            var active = i == (int)tab;
+            _tabIconLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
+            _tabTextLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
+        }
+    }
+
+    // ── summary cards ─────────────────────────────────────────────────────
     private View SummaryGrid()
     {
         var grid = new Grid
         {
-            ColumnSpacing = 10,
-            RowSpacing = 10,
+            ColumnSpacing = AppUi.S(10),
+            RowSpacing = AppUi.S(10),
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
@@ -258,51 +445,38 @@ public sealed class DashboardPage : ContentPage
 
     private static View SummaryCard(string title, Label value, Color accent)
     {
-        var box = new BoxView { Color = accent, WidthRequest = 4, HorizontalOptions = LayoutOptions.Start, VerticalOptions = LayoutOptions.Fill };
-        var stack = new VerticalStackLayout
-        {
-            Spacing = 6,
-            Children =
-            {
-                new Label { Text = title, TextColor = AppColors.Muted, FontSize = 12 },
-                value
-            }
-        };
+        var bar = new BoxView { Color = accent, WidthRequest = 4, HorizontalOptions = LayoutOptions.Start, VerticalOptions = LayoutOptions.Fill };
+        var stack = new VerticalStackLayout { Spacing = 5, Children = { new Label { Text = title, TextColor = AppColors.Muted, FontSize = AppUi.S(12) }, value } };
         Grid.SetColumn(stack, 1);
-
-        var content = new Grid
+        return Card(new Grid
         {
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(GridLength.Star)
             },
-            ColumnSpacing = 10,
-            Children =
-            {
-                box,
-                stack
-            }
-        };
-        return Card(content, 14);
+            ColumnSpacing = AppUi.S(10),
+            Children = { bar, stack }
+        }, AppUi.S(14));
     }
 
+    // ── reusable UI helpers ───────────────────────────────────────────────
     private static View Section(string title, View content)
         => Card(new VerticalStackLayout
         {
-            Spacing = 10,
+            Spacing = AppUi.S(10),
             Children =
             {
-                new Label { Text = title, FontSize = 17, FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy },
+                new Label { Text = title, FontSize = AppUi.S(16), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy },
                 content
             }
-        }, 14);
+        }, AppUi.S(14));
 
     private static Border Card(View content, double padding)
         => new()
         {
             Stroke = Color.FromArgb("#D8E1EC"),
-            StrokeShape = new RoundRectangle { CornerRadius = 18 },
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(16) },
             BackgroundColor = AppColors.Card,
             Padding = new Thickness(padding),
             Content = content
@@ -312,19 +486,16 @@ public sealed class DashboardPage : ContentPage
         => new()
         {
             Stroke = Color.FromArgb("#D8E1EC"),
-            StrokeShape = new RoundRectangle { CornerRadius = 14 },
+            StrokeShape = new RoundRectangle { CornerRadius = 10 },
             BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(8, 0),
+            Padding = new Thickness(AppUi.S(8), 0),
             Content = content
         };
 
+    // ── data loading (unchanged logic) ───────────────────────────────────
     private async Task LoadAsync(bool fromPull = false)
     {
-        if (_loading)
-        {
-            return;
-        }
-
+        if (_loading) return;
         try
         {
             _loading = true;
@@ -334,15 +505,10 @@ public sealed class DashboardPage : ContentPage
 
             var stores = await _api.StoresAsync();
             _stores = stores.Stores.Where(s => s.Enabled).ToList();
-            _storePicker.ItemsSource = _stores.Select(s => s.Name).ToList();
             if (_stores.Count == 0)
-            {
                 throw new InvalidOperationException("Tenant chưa có cửa hàng Revenue Cloud đang bật.");
-            }
 
-            var selected = Math.Max(0, _stores.FindIndex(s => s.StoreId == _session.StoreId));
-            _storePicker.SelectedIndex = selected;
-            _session.StoreId = _stores[selected].StoreId;
+            _session.StoreId = _stores[0].StoreId;
             await LoadReportsAsync();
             UpdateOfflineBanner();
         }
@@ -350,9 +516,7 @@ public sealed class DashboardPage : ContentPage
         {
             UpdateOfflineBanner();
             if (!fromPull)
-            {
-                await DisplayAlertAsync("Không tải được dữ liệu", ex.Message, "OK");
-            }
+                await DisplayAlert("Không tải được dữ liệu", ex.Message, "OK");
         }
         finally
         {
@@ -364,16 +528,8 @@ public sealed class DashboardPage : ContentPage
 
     private async Task LoadReportsAsync(bool silent = false)
     {
-        if (_loading && silent)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_session.StoreId))
-        {
-            return;
-        }
-
+        if (_loading && silent) return;
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
         try
         {
             var date = PickerDate(_datePicker);
@@ -381,10 +537,20 @@ public sealed class DashboardPage : ContentPage
             var month = await _api.MonthAsync(date, _session.StoreId);
             var top = await _api.TopProductsAsync(date.AddDays(-6), date, _session.StoreId);
             var invoices = await _api.InvoicesAsync(date.AddDays(-6), date, _session.StoreId);
+            OpenTablesReport? openTables = null;
+            string openTablesError = string.Empty;
+            try
+            {
+                openTables = await _api.OpenTablesAsync(_session.StoreId);
+            }
+            catch (Exception tableEx)
+            {
+                openTablesError = tableEx.Message;
+            }
 
             _syncStatus.Text = today.LastSyncAt is null
                 ? "Chưa có lần đồng bộ cloud"
-                : $"Đồng bộ gần nhất: {today.LastSyncAt:dd/MM/yyyy HH:mm}";
+                : $"Đồng bộ: {today.LastSyncAt:dd/MM/yyyy HH:mm}";
             _revenue.Text = RevenueApiClient.Money(today.Summary.Revenue);
             _invoiceCount.Text = today.Summary.InvoiceCount.ToString("N0");
             _avg.Text = RevenueApiClient.Money(today.Summary.AverageInvoiceValue);
@@ -393,6 +559,7 @@ public sealed class DashboardPage : ContentPage
             RenderPayment(today.PaymentBreakdown);
             RenderTop(top.Items);
             RenderInvoices(invoices.Items);
+            RenderTables(openTables, openTablesError);
             await LoadRangeAsync(silent: true);
             UpdateOfflineBanner();
         }
@@ -400,47 +567,36 @@ public sealed class DashboardPage : ContentPage
         {
             UpdateOfflineBanner();
             if (!silent)
-            {
-                await DisplayAlertAsync("Không tải được báo cáo", ex.Message, "OK");
-            }
+                await DisplayAlert("Không tải được báo cáo", ex.Message, "OK");
         }
     }
 
     private async Task LoadRangeAsync(bool silent = false)
     {
-        if (string.IsNullOrWhiteSpace(_session.StoreId))
-        {
-            return;
-        }
-
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
         var from = PickerDate(_fromPicker);
         var to = PickerDate(_toPicker);
         if (from.Date > to.Date)
         {
             if (!silent)
-            {
-                await DisplayAlertAsync("Khoảng ngày không hợp lệ", "Từ ngày phải nhỏ hơn hoặc bằng đến ngày.", "OK");
-            }
+                await DisplayAlert("Khoảng ngày không hợp lệ", "Từ ngày phải nhỏ hơn hoặc bằng đến ngày.", "OK");
             return;
         }
-
         try
         {
             _rangeButton.IsEnabled = false;
             var range = await _api.RangeAsync(from, to, _session.StoreId);
             _rangeRevenue.Text = RevenueApiClient.Money(range.Summary.Revenue);
-            _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hóa đơn hủy";
+            _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hủy";
             _rangePayments.Text =
-                $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}  •  Thẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
+                $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}\nThẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
             UpdateOfflineBanner();
         }
         catch (Exception ex)
         {
             UpdateOfflineBanner();
             if (!silent)
-            {
-                await DisplayAlertAsync("Không tải được báo cáo khoảng ngày", ex.Message, "OK");
-            }
+                await DisplayAlert("Không tải được báo cáo khoảng ngày", ex.Message, "OK");
         }
         finally
         {
@@ -448,6 +604,7 @@ public sealed class DashboardPage : ContentPage
         }
     }
 
+    // ── render methods (unchanged logic) ──────────────────────────────────
     private void RenderDaily(IReadOnlyList<DailyPoint> points, IReadOnlyList<DailyPoint> monthPoints)
     {
         _dailyPanel.Clear();
@@ -455,10 +612,9 @@ public sealed class DashboardPage : ContentPage
         _lineDrawable.Points = monthPoints;
         _lineChart.Invalidate();
         foreach (var p in points.TakeLast(7))
-        {
             _dailyPanel.Add(BarRow(ShortDate(p.Date), p.Revenue, max, AppColors.Blue));
-        }
-        if (_dailyPanel.Children.Count == 0) _dailyPanel.Add(EmptyLabel("Chưa có dữ liệu."));
+        if (_dailyPanel.Children.Count == 0)
+            _dailyPanel.Add(EmptyLabel("Chưa có dữ liệu."));
     }
 
     private void RenderPayment(IReadOnlyList<PaymentSlice> slices)
@@ -468,34 +624,74 @@ public sealed class DashboardPage : ContentPage
         _pieDrawable.Slices = slices;
         _pieChart.Invalidate();
         foreach (var p in slices.Where(s => s.Amount > 0))
-        {
             _paymentPanel.Add(BarRow(PaymentLabel(p.Method), p.Amount, max, AppColors.Green));
-        }
-        if (_paymentPanel.Children.Count == 0) _paymentPanel.Add(EmptyLabel("Chưa có dữ liệu thanh toán."));
+        if (_paymentPanel.Children.Count == 0)
+            _paymentPanel.Add(EmptyLabel("Chưa có dữ liệu thanh toán."));
     }
 
     private void RenderTop(IReadOnlyList<TopProductDto> items)
     {
         _topPanel.Clear();
-        foreach (var item in items.Take(5))
+        foreach (var item in items.Take(10))
+            _topPanel.Add(ListRow($"{item.ProductName}", $"SL {item.Quantity:N0}  •  {RevenueApiClient.Money(item.Revenue)}", showChevron: false));
+        if (_topPanel.Children.Count == 0)
+            _topPanel.Add(EmptyLabel("Chưa có dữ liệu."));
+    }
+
+    private void RenderTables(OpenTablesReport? report, string error)
+    {
+        _tablesPanel.Clear();
+        if (report is null)
         {
-            _topPanel.Add(ListRow(item.ProductName, $"SL {item.Quantity:N0}  •  {RevenueApiClient.Money(item.Revenue)}"));
+            _tableCountLabel.Text = "–";
+            _tableEstimatedLabel.Text = RevenueApiClient.Money(0);
+            _tablesPanel.Add(EmptyLabel(string.IsNullOrWhiteSpace(error)
+                ? "Chưa có dữ liệu bàn đang phục vụ."
+                : $"Chưa đọc được dữ liệu bàn đang phục vụ: {error}"));
+            return;
         }
-        if (_topPanel.Children.Count == 0) _topPanel.Add(EmptyLabel("Chưa có dữ liệu."));
+
+        _tableCountLabel.Text = report.TableCount.ToString("N0");
+        _tableEstimatedLabel.Text = RevenueApiClient.Money(report.EstimatedTotal);
+
+        foreach (var table in report.Tables.OrderBy(t => t.OccupiedAt ?? DateTimeOffset.MaxValue).ThenBy(t => t.TableName).Take(100))
+        {
+            var zone = string.IsNullOrWhiteSpace(table.ZoneName) ? table.ZoneId : table.ZoneName;
+            var opened = table.OccupiedAt is null
+                ? "chưa rõ giờ mở"
+                : $"mở {table.OccupiedAt.Value.ToLocalTime():HH:mm dd/MM}";
+            var subtitle = string.IsNullOrWhiteSpace(zone)
+                ? $"{opened}  •  Đơn {table.OrderId}"
+                : $"{zone}  •  {opened}  •  Đơn {table.OrderId}";
+
+            _tablesPanel.Add(ListRow(
+                $"{table.TableName} — {RevenueApiClient.Money(table.Total)}",
+                subtitle,
+                showChevron: false));
+        }
+
+        if (_tablesPanel.Children.Count == 0)
+        {
+            _tablesPanel.Add(EmptyLabel("Hiện không có bàn đang phục vụ."));
+        }
     }
 
     private void RenderInvoices(IReadOnlyList<InvoiceListItem> items)
     {
         _invoicePanel.Clear();
-        foreach (var item in items.Take(10))
+        foreach (var item in items.Take(30))
         {
-            var row = ListRow($"{item.TableName} - {RevenueApiClient.Money(item.Total)}", $"{ShortDate(item.BusinessDate)}  •  {StatusLabel(item.Status)}");
+            var row = ListRow(
+                $"{item.TableName} — {RevenueApiClient.Money(item.Total)}",
+                $"{ShortDate(item.BusinessDate)}  •  {StatusLabel(item.Status)}",
+                showChevron: true);
             var tap = new TapGestureRecognizer();
             tap.Tapped += async (_, _) => await ShowInvoiceDetailAsync(item.InvoiceId);
             row.GestureRecognizers.Add(tap);
             _invoicePanel.Add(row);
         }
-        if (_invoicePanel.Children.Count == 0) _invoicePanel.Add(EmptyLabel("Chưa có hóa đơn."));
+        if (_invoicePanel.Children.Count == 0)
+            _invoicePanel.Add(EmptyLabel("Chưa có hóa đơn."));
     }
 
     private async Task ShowInvoiceDetailAsync(string invoiceId)
@@ -509,17 +705,18 @@ public sealed class DashboardPage : ContentPage
             var items = invoice.Items.Count == 0
                 ? "Không có món"
                 : string.Join("\n", invoice.Items.Select(x => $"{x.ProductName} x{x.Quantity:N0}: {RevenueApiClient.Money(x.LineTotal)}"));
-            await DisplayAlertAsync(
-                $"{invoice.TableName} - {RevenueApiClient.Money(invoice.Total)}",
+            await DisplayAlert(
+                $"{invoice.TableName} — {RevenueApiClient.Money(invoice.Total)}",
                 $"Ngày: {invoice.BusinessDate}\nTrạng thái: {StatusLabel(invoice.Status)}\n\nThanh toán:\n{payments}\n\nMón:\n{items}",
                 "Đóng");
         }
         catch (Exception ex)
         {
-            await DisplayAlertAsync("Không tải được chi tiết hóa đơn", ex.Message, "OK");
+            await DisplayAlert("Không tải được chi tiết hóa đơn", ex.Message, "OK");
         }
     }
 
+    // ── bar row (proportional, no fixed width) ────────────────────────────
     private static View BarRow(string label, decimal value, decimal max, Color color)
     {
         var ratio = max <= 0 ? 0 : Math.Clamp((double)(value / max), 0, 1);
@@ -528,7 +725,7 @@ public sealed class DashboardPage : ContentPage
         var track = new Grid
         {
             BackgroundColor = Color.FromArgb("#E2E8F0"),
-            HeightRequest = 9,
+            HeightRequest = 8,
             HorizontalOptions = LayoutOptions.Fill,
             ColumnDefinitions =
             {
@@ -542,23 +739,24 @@ public sealed class DashboardPage : ContentPage
             Spacing = 4,
             Children =
             {
-                new Label { Text = $"{label}: {RevenueApiClient.Money(value)}", TextColor = AppColors.Navy, FontSize = 13 },
+                new Label { Text = $"{label}: {RevenueApiClient.Money(value)}", TextColor = AppColors.Navy, FontSize = AppUi.S(13) },
                 track
             }
         };
     }
 
-    private static View ListRow(string title, string subtitle)
+    private static Border ListRow(string title, string subtitle, bool showChevron)
     {
-        var subtitleLabel = new Label { Text = subtitle, TextColor = AppColors.Muted, FontSize = 12, HorizontalTextAlignment = TextAlignment.End };
-        Grid.SetColumn(subtitleLabel, 1);
+        var subtitleLabel = new Label { Text = subtitle, TextColor = AppColors.Muted, FontSize = AppUi.S(12) };
+        var chevron = new Label { Text = "›", TextColor = AppColors.Muted, FontSize = AppUi.S(22), VerticalTextAlignment = TextAlignment.Center, IsVisible = showChevron };
+        Grid.SetColumn(chevron, 1);
 
         return new Border
         {
             Stroke = Color.FromArgb("#E2E8F0"),
-            StrokeShape = new RoundRectangle { CornerRadius = 12 },
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(12) },
             BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(14, 13),
+            Padding = new Thickness(AppUi.S(14), AppUi.S(13)),
             Content = new Grid
             {
                 ColumnDefinitions =
@@ -568,8 +766,16 @@ public sealed class DashboardPage : ContentPage
                 },
                 Children =
                 {
-                    new Label { Text = title, TextColor = AppColors.Navy, FontSize = 14, FontAttributes = FontAttributes.Bold, LineBreakMode = LineBreakMode.TailTruncation },
-                    subtitleLabel
+                    new VerticalStackLayout
+                    {
+                        Spacing = 3,
+                        Children =
+                        {
+                            new Label { Text = title, TextColor = AppColors.Navy, FontSize = AppUi.S(14), FontAttributes = FontAttributes.Bold, LineBreakMode = LineBreakMode.TailTruncation },
+                            subtitleLabel
+                        }
+                    },
+                    chevron
                 }
             }
         };
@@ -587,20 +793,23 @@ public sealed class DashboardPage : ContentPage
                 : $"Đang dùng dữ liệu cache. Lưu lúc {cache.CachedAt:dd/MM/yyyy HH:mm}.";
             return;
         }
-
         _offlineBanner.BackgroundColor = AppColors.Red;
         _offlineBanner.IsVisible = Connectivity.Current.NetworkAccess != NetworkAccess.Internet;
         _offlineBanner.Text = _offlineBanner.IsVisible ? "Không có kết nối Internet." : string.Empty;
     }
 
+    private async Task LogoutAsync()
+    {
+        await _api.LogoutAsync();
+        await Navigation.PushAsync(_services.GetRequiredService<LoginPage>());
+        Navigation.RemovePage(this);
+    }
+
     private static Label EmptyLabel(string text)
-        => new() { Text = text, TextColor = AppColors.Muted, FontSize = 13 };
+        => new() { Text = text, TextColor = AppColors.Muted, FontSize = AppUi.S(13) };
 
     private static Label ValueLabel(double size, Color color)
         => new() { FontSize = size, FontAttributes = FontAttributes.Bold, TextColor = color, LineBreakMode = LineBreakMode.NoWrap };
-
-    private static Button IconButton(string text, Color color)
-        => new() { Text = text, BackgroundColor = color, TextColor = Colors.White, CornerRadius = 12, HeightRequest = AppUi.S(50), Padding = new Thickness(AppUi.S(14), 0), FontSize = AppUi.S(13), FontAttributes = FontAttributes.Bold };
 
     internal static string PaymentLabelForChart(string method) => PaymentLabel(method);
 
@@ -625,14 +834,9 @@ public sealed class DashboardPage : ContentPage
 
     private static DateTime PickerDate(MauiDatePicker picker)
         => picker.Date ?? DateTime.Today;
-    private async Task LogoutAsync()
-    {
-        await _api.LogoutAsync();
-        await Navigation.PushAsync(_services.GetRequiredService<LoginPage>());
-        Navigation.RemovePage(this);
-    }
 }
 
+// ── chart drawables (unchanged) ───────────────────────────────────────────
 internal sealed class RevenueLineDrawable : IDrawable
 {
     public IReadOnlyList<DailyPoint> Points { get; set; } = [];
@@ -641,11 +845,7 @@ internal sealed class RevenueLineDrawable : IDrawable
     {
         canvas.FillColor = Color.FromArgb("#F8FAFC");
         canvas.FillRoundedRectangle(dirtyRect, 14);
-        if (Points.Count == 0)
-        {
-            DrawEmpty(canvas, dirtyRect, "Chưa có dữ liệu tháng");
-            return;
-        }
+        if (Points.Count == 0) { DrawEmpty(canvas, dirtyRect, "Chưa có dữ liệu tháng"); return; }
 
         var max = Math.Max(1, Points.Max(p => p.Revenue));
         var left = dirtyRect.Left + 14;
@@ -655,7 +855,6 @@ internal sealed class RevenueLineDrawable : IDrawable
         canvas.StrokeColor = Color.FromArgb("#CBD5E1");
         canvas.StrokeSize = 1;
         canvas.DrawLine(left, top + height, left + width, top + height);
-
         canvas.StrokeColor = AppColors.Blue;
         canvas.StrokeSize = 3;
         var last = PointF.Zero;
@@ -664,10 +863,7 @@ internal sealed class RevenueLineDrawable : IDrawable
             var x = left + (Points.Count == 1 ? 0 : width * i / (Points.Count - 1));
             var y = top + height - (float)(Points[i].Revenue / max) * height;
             var current = new PointF(x, y);
-            if (i > 0)
-            {
-                canvas.DrawLine(last.X, last.Y, current.X, current.Y);
-            }
+            if (i > 0) canvas.DrawLine(last.X, last.Y, current.X, current.Y);
             canvas.FillColor = AppColors.Blue;
             canvas.FillCircle(current, 3);
             last = current;
@@ -692,12 +888,7 @@ internal sealed class PaymentPieDrawable : IDrawable
         canvas.FillRoundedRectangle(dirtyRect, 14);
         var rows = Slices.Where(s => s.Amount > 0).ToList();
         var total = rows.Sum(s => s.Amount);
-        if (total <= 0)
-        {
-            canvas.FontColor = AppColors.Muted;
-            canvas.DrawString("Chưa có dữ liệu thanh toán", dirtyRect, HorizontalAlignment.Center, VerticalAlignment.Center);
-            return;
-        }
+        if (total <= 0) { canvas.FontColor = AppColors.Muted; canvas.DrawString("Chưa có dữ liệu", dirtyRect, HorizontalAlignment.Center, VerticalAlignment.Center); return; }
 
         var size = Math.Min(dirtyRect.Width * 0.42f, dirtyRect.Height - 28);
         var pie = new RectF(dirtyRect.Left + 14, dirtyRect.Top + 14, size, size);
@@ -709,7 +900,6 @@ internal sealed class PaymentPieDrawable : IDrawable
             canvas.FillArc(pie, start, sweep, true);
             start += sweep;
         }
-
         canvas.FontColor = AppColors.Navy;
         canvas.FontSize = 12;
         var legendX = pie.Right + 12;
@@ -719,9 +909,10 @@ internal sealed class PaymentPieDrawable : IDrawable
             canvas.FillColor = Colors[i % Colors.Length];
             canvas.FillRectangle(legendX, legendY + i * 24, 12, 12);
             canvas.FontColor = AppColors.Navy;
-            canvas.DrawString($"{DashboardPage.PaymentLabelForChart(rows[i].Method)} {RevenueApiClient.Money(rows[i].Amount)}", legendX + 18, legendY + i * 24 - 2, dirtyRect.Right - legendX - 22, 18, HorizontalAlignment.Left, VerticalAlignment.Top);
+            canvas.DrawString(
+                $"{DashboardPage.PaymentLabelForChart(rows[i].Method)} {RevenueApiClient.Money(rows[i].Amount)}",
+                legendX + 18, legendY + i * 24 - 2, dirtyRect.Right - legendX - 22, 18,
+                HorizontalAlignment.Left, VerticalAlignment.Top);
         }
     }
 }
-
-

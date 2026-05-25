@@ -75,6 +75,9 @@ public sealed class RevenueApiClient
     public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<InvoiceListResponse>($"/invoices?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&page=1&pageSize=30", "invoices", cancellationToken);
 
+    public Task<OpenTablesReport> OpenTablesAsync(string storeId, CancellationToken cancellationToken = default)
+        => GetCachedAsync<OpenTablesReport>($"/reports/open-tables?storeId={Uri.EscapeDataString(storeId)}", "open_tables", cancellationToken);
+
     public async Task<InvoiceDetailResponse> InvoiceDetailAsync(string invoiceId, string storeId, CancellationToken cancellationToken = default)
     {
         try
@@ -210,6 +213,8 @@ public sealed record DailyPoint(string Date, decimal Revenue, int InvoiceCount);
 public sealed record PaymentSlice(string Method, decimal Amount);
 public sealed record TopProductsResponse(string From, string To, List<TopProductDto> Items);
 public sealed record TopProductDto(string ProductId, string ProductName, string ProductType, decimal Quantity, decimal Revenue);
+public sealed record OpenTablesReport(string StoreId, DateTimeOffset? LastSyncAt, int TableCount, decimal EstimatedTotal, List<OpenTableDto> Tables);
+public sealed record OpenTableDto(string TableId, string TableName, string ZoneId, string ZoneName, string OrderId, DateTimeOffset? OccupiedAt, decimal Total, DateTimeOffset? ModifiedAt, DateTimeOffset? SyncedAt);
 public sealed record InvoiceListResponse(int Page, int PageSize, int TotalItems, List<InvoiceListItem> Items);
 public sealed record InvoiceListItem(string InvoiceId, int InvoiceVersion, string Status, string BusinessDate, string TableName, string Cashier, DateTimeOffset? PaidAt, decimal Subtotal, decimal Discount, decimal Total, string PaymentMethod);
 public sealed record InvoiceDetailResponse(
