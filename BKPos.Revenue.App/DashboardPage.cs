@@ -532,11 +532,18 @@ public sealed class DashboardPage : ContentPage
         if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
         try
         {
-            var date = PickerDate(_datePicker);
-            var today = await _api.TodayAsync(date, _session.StoreId);
-            var month = await _api.MonthAsync(date, _session.StoreId);
-            var top = await _api.TopProductsAsync(date.AddDays(-6), date, _session.StoreId);
-            var invoices = await _api.InvoicesAsync(date.AddDays(-6), date, _session.StoreId);
+            var requestedDate = PickerDate(_datePicker);
+            var today = await _api.TodayAsync(requestedDate, _session.StoreId);
+            var month = await _api.MonthAsync(requestedDate, _session.StoreId);
+            var reportDate = ResolveReportDate(requestedDate, today, month);
+            if (reportDate.Date != requestedDate.Date)
+            {
+                today = await _api.TodayAsync(reportDate, _session.StoreId);
+            }
+
+            var fromDate = reportDate.AddDays(-6);
+            var top = await _api.TopProductsAsync(fromDate, reportDate, _session.StoreId);
+            var invoices = await _api.InvoicesAsync(fromDate, reportDate, _session.StoreId);
             OpenTablesReport? openTables = null;
             string openTablesError = string.Empty;
             try
@@ -548,9 +555,12 @@ public sealed class DashboardPage : ContentPage
                 openTablesError = tableEx.Message;
             }
 
+            var dateNote = reportDate.Date == requestedDate.Date
+                ? string.Empty
+                : $" • Dữ liệu gần nhất: {reportDate:dd/MM/yyyy}";
             _syncStatus.Text = today.LastSyncAt is null
-                ? "Chưa có lần đồng bộ cloud"
-                : $"Đồng bộ: {today.LastSyncAt:dd/MM/yyyy HH:mm}";
+                ? "Chưa có lần đồng bộ cloud" + dateNote
+                : $"Đồng bộ: {today.LastSyncAt:dd/MM/yyyy HH:mm}{dateNote}";
             _revenue.Text = RevenueApiClient.Money(today.Summary.Revenue);
             _invoiceCount.Text = today.Summary.InvoiceCount.ToString("N0");
             _avg.Text = RevenueApiClient.Money(today.Summary.AverageInvoiceValue);
@@ -569,6 +579,24 @@ public sealed class DashboardPage : ContentPage
             if (!silent)
                 await DisplayAlert("Không tải được báo cáo", ex.Message, "OK");
         }
+    }
+
+    private static DateTime ResolveReportDate(DateTime requestedDate, TodayReport today, MonthReport month)
+    {
+        if (today.Summary.InvoiceCount > 0 || today.Summary.Revenue > 0)
+        {
+            return requestedDate.Date;
+        }
+
+        var latest = month.Daily
+            .Where(point => point.InvoiceCount > 0 || point.Revenue > 0)
+            .Select(point => DateTime.TryParse(point.Date, out var date) ? date.Date : (DateTime?)null)
+            .Where(date => date is not null && date.Value <= requestedDate.Date)
+            .Select(date => date!.Value)
+            .DefaultIfEmpty(requestedDate.Date)
+            .Max();
+
+        return latest;
     }
 
     private async Task LoadRangeAsync(bool silent = false)
@@ -656,13 +684,13 @@ public sealed class DashboardPage : ContentPage
 
         foreach (var table in report.Tables.OrderBy(t => t.OccupiedAt ?? DateTimeOffset.MaxValue).ThenBy(t => t.TableName).Take(100))
         {
-            var zone = string.IsNullOrWhiteSpace(table.ZoneName) ? table.ZoneId : table.ZoneName;
+            var zone = table.ZoneName;
             var opened = table.OccupiedAt is null
-                ? "chưa rõ giờ mở"
-                : $"mở {table.OccupiedAt.Value.ToLocalTime():HH:mm dd/MM}";
+                ? "Chưa rõ giờ mở"
+                : $"Mở {table.OccupiedAt.Value.ToLocalTime():HH:mm dd/MM}";
             var subtitle = string.IsNullOrWhiteSpace(zone)
-                ? $"{opened}  •  Đơn {table.OrderId}"
-                : $"{zone}  •  {opened}  •  Đơn {table.OrderId}";
+                ? opened
+                : $"{zone} • {opened}";
 
             _tablesPanel.Add(ListRow(
                 $"{table.TableName} — {RevenueApiClient.Money(table.Total)}",

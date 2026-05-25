@@ -61,19 +61,19 @@ public sealed class RevenueApiClient
         => CacheStatus = RevenueCacheStatus.Online;
 
     public Task<TodayReport> TodayAsync(DateTime date, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<TodayReport>($"/reports/today?date={DateOnly.FromDateTime(date):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", "today", cancellationToken);
+        => GetCachedAsync<TodayReport>($"/reports/today?date={DateOnly.FromDateTime(date):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", $"today_{date:yyyyMMdd}", cancellationToken);
 
     public Task<MonthReport> MonthAsync(DateTime date, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<MonthReport>($"/reports/month?month={date:yyyy-MM}&storeId={Uri.EscapeDataString(storeId)}", "month", cancellationToken);
+        => GetCachedAsync<MonthReport>($"/reports/month?month={date:yyyy-MM}&storeId={Uri.EscapeDataString(storeId)}", $"month_{date:yyyyMM}", cancellationToken);
 
     public Task<RangeReport> RangeAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<RangeReport>($"/reports/range?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", $"range_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
     public Task<TopProductsResponse> TopProductsAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<TopProductsResponse>($"/reports/top-products?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&limit=5", "top", cancellationToken);
+        => GetCachedAsync<TopProductsResponse>($"/reports/top-products?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&limit=5", $"top_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
     public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<InvoiceListResponse>($"/invoices?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&page=1&pageSize=30", "invoices", cancellationToken);
+        => GetCachedAsync<InvoiceListResponse>($"/invoices?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&page=1&pageSize=30", $"invoices_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
     public Task<OpenTablesReport> OpenTablesAsync(string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<OpenTablesReport>($"/reports/open-tables?storeId={Uri.EscapeDataString(storeId)}", "open_tables", cancellationToken);
