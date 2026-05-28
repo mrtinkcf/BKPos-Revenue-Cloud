@@ -54,6 +54,34 @@ public sealed class RevenueApiClient
         }
     }
 
+    public async Task<bool> RefreshSessionAsync(CancellationToken cancellationToken = default)
+    {
+        var refreshToken = await _session.GetRefreshTokenAsync();
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return false;
+        }
+
+        try
+        {
+            var response = await SendAsync<LoginResponse>(
+                HttpMethod.Post,
+                "/auth/refresh",
+                JsonContent.Create(new { refreshToken }, options: JsonOptions),
+                authenticated: false,
+                cancellationToken,
+                allowRefreshRetry: false);
+            await _session.SaveTokensAsync(response.AccessToken, response.RefreshToken);
+            return true;
+        }
+        catch
+        {
+            _session.ClearTokens();
+            return false;
+        }
+    }
+
+
     public Task<StoresResponse> StoresAsync(CancellationToken cancellationToken = default)
         => GetCachedAsync<StoresResponse>("/stores", "stores", cancellationToken);
 
@@ -133,13 +161,20 @@ public sealed class RevenueApiClient
     private Task<T> PostAsync<T>(string path, object body, bool authenticated, CancellationToken cancellationToken)
         => SendAsync<T>(HttpMethod.Post, path, JsonContent.Create(body, options: JsonOptions), authenticated, cancellationToken);
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, HttpContent? content, bool authenticated, CancellationToken cancellationToken)
+    private async Task<T> SendAsync<T>(HttpMethod method, string path, HttpContent? content, bool authenticated, CancellationToken cancellationToken, bool allowRefreshRetry = true)
     {
         var request = new HttpRequestMessage(method, BuildUri(path));
         request.Content = content;
         if (authenticated)
         {
             var token = await _session.GetAccessTokenAsync();
+            if (string.IsNullOrWhiteSpace(token) &&
+                allowRefreshRetry &&
+                await RefreshSessionAsync(cancellationToken))
+            {
+                token = await _session.GetAccessTokenAsync();
+            }
+
             if (string.IsNullOrWhiteSpace(token))
             {
                 throw new InvalidOperationException("Phiên đăng nhập đã hết hạn.");
@@ -152,6 +187,31 @@ public sealed class RevenueApiClient
         var text = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
+            if (authenticated &&
+                allowRefreshRetry &&
+                content is null &&
+                response.StatusCode == System.Net.HttpStatusCode.Unauthorized &&
+                await RefreshSessionAsync(cancellationToken))
+            {
+                using var retryRequest = new HttpRequestMessage(method, BuildUri(path));
+                var token = await _session.GetAccessTokenAsync();
+                retryRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var retryResponse = await _http.SendAsync(retryRequest, cancellationToken);
+                var retryText = await retryResponse.Content.ReadAsStringAsync(cancellationToken);
+                if (!retryResponse.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(ParseError(retryText, retryResponse.StatusCode));
+                }
+
+                if (typeof(T) == typeof(object))
+                {
+                    return (T)(object)new object();
+                }
+
+                return JsonSerializer.Deserialize<T>(retryText, JsonOptions)
+                    ?? throw new InvalidOperationException("Cloud trả dữ liệu rỗng.");
+            }
+
             throw new InvalidOperationException(ParseError(text, response.StatusCode));
         }
 

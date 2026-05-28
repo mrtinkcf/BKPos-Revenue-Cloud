@@ -14,6 +14,7 @@ public sealed class LoginPage : ContentPage
     private readonly IServiceProvider _services;
     private readonly MauiEntry _username = new() { Placeholder = "Tên đăng nhập", ReturnType = ReturnType.Next };
     private readonly MauiEntry _password = new() { Placeholder = "Mật khẩu", IsPassword = true, ReturnType = ReturnType.Done };
+    private readonly CheckBox _rememberCredentials = new() { Color = AppColors.Blue, VerticalOptions = LayoutOptions.Center };
     private readonly Label _status = new() { TextColor = AppColors.Red, LineBreakMode = LineBreakMode.WordWrap };
     private readonly Button _loginButton = new()
     {
@@ -31,9 +32,16 @@ public sealed class LoginPage : ContentPage
         _services = services;
         BackgroundColor = AppColors.Navy;
         MauiNavigationPage.SetHasNavigationBar(this, false);
+        HideSoftInputOnTapped = true;
         On<iOS>().SetUseSafeArea(true);
         Build();
-        LoadSaved();
+    }
+
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+        await LoadSavedAsync();
+        await ResumeSessionAsync();
     }
 
     private void Build()
@@ -108,6 +116,7 @@ public sealed class LoginPage : ContentPage
                     Field(_username),
                     FieldLabel("Mật khẩu"),
                     Field(_password),
+                    RememberRow(),
                     new BoxView { HeightRequest = AppUi.IsSmallScreen ? 0 : 4, Color = Colors.Transparent },
                     _loginButton,
                     _status
@@ -177,9 +186,61 @@ public sealed class LoginPage : ContentPage
         };
     }
 
-    private void LoadSaved()
+    private View RememberRow()
+    {
+        var label = new Label
+        {
+            Text = "Lưu tên đăng nhập và mật khẩu",
+            TextColor = AppColors.Navy,
+            FontSize = AppUi.S(13),
+            VerticalTextAlignment = TextAlignment.Center
+        };
+        var row = new HorizontalStackLayout
+        {
+            Spacing = AppUi.S(6),
+            Children = { _rememberCredentials, label }
+        };
+        var tap = new TapGestureRecognizer();
+        tap.Tapped += (_, _) => _rememberCredentials.IsChecked = !_rememberCredentials.IsChecked;
+        row.GestureRecognizers.Add(tap);
+        return row;
+    }
+
+    private async Task LoadSavedAsync()
     {
         _username.Text = _session.Username;
+        _rememberCredentials.IsChecked = _session.RememberCredentials;
+        if (_session.RememberCredentials && string.IsNullOrEmpty(_password.Text))
+        {
+            _password.Text = await _session.GetSavedPasswordAsync();
+        }
+    }
+
+    private async Task ResumeSessionAsync()
+    {
+        if (!await _session.HasSessionAsync() ||
+            string.IsNullOrWhiteSpace(_session.WorkerUrl) ||
+            string.IsNullOrWhiteSpace(_session.TenantId))
+        {
+            return;
+        }
+
+        try
+        {
+            _loginButton.IsEnabled = false;
+            _status.TextColor = AppColors.Muted;
+            _status.Text = "Đang khôi phục phiên đăng nhập...";
+            if (await _api.RefreshSessionAsync())
+            {
+                _status.Text = string.Empty;
+                await Navigation.PushAsync(_services.GetRequiredService<DashboardPage>());
+                Navigation.RemovePage(this);
+            }
+        }
+        finally
+        {
+            _loginButton.IsEnabled = true;
+        }
     }
 
     private async Task LoginAsync()
@@ -209,6 +270,15 @@ public sealed class LoginPage : ContentPage
             _status.TextColor = AppColors.Muted;
             _status.Text = "Đang đăng nhập...";
             await _api.LoginAsync(_session.WorkerUrl, _session.TenantId, _username.Text, _password.Text ?? string.Empty);
+            _session.RememberCredentials = _rememberCredentials.IsChecked;
+            if (_rememberCredentials.IsChecked)
+            {
+                await _session.SavePasswordAsync(_password.Text ?? string.Empty);
+            }
+            else
+            {
+                _session.ClearSavedPassword();
+            }
             _status.Text = string.Empty;
             await Navigation.PushAsync(_services.GetRequiredService<DashboardPage>());
             Navigation.RemovePage(this);

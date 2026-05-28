@@ -20,6 +20,7 @@ public sealed class DashboardPage : ContentPage
     private readonly MauiDatePicker _datePicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiPicker _rangePresetPicker = new() { Title = "Chọn khoảng báo cáo", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
     private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
     private readonly Label _revenue = ValueLabel(AppUi.S(28), AppColors.Blue);
@@ -50,6 +51,7 @@ public sealed class DashboardPage : ContentPage
     private readonly RefreshView _refreshView = new();
     private readonly IDispatcherTimer? _autoRefreshTimer;
     private bool _loading;
+    private bool _updatingRangePreset;
     private List<StoreDto> _stores = [];
 
     // ── header action buttons ─────────────────────────────────────────────
@@ -99,6 +101,7 @@ public sealed class DashboardPage : ContentPage
         _pieChart = new GraphicsView { Drawable = _pieDrawable, HeightRequest = AppUi.ChartHeight };
         BackgroundColor = Colors.White;
         MauiNavigationPage.SetHasNavigationBar(this, false);
+        HideSoftInputOnTapped = true;
         On<iOS>().SetUseSafeArea(true);
         _autoRefreshTimer = Dispatcher.CreateTimer();
         _autoRefreshTimer.Interval = TimeSpan.FromSeconds(60);
@@ -128,11 +131,21 @@ public sealed class DashboardPage : ContentPage
         _refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
         _datePicker.DateSelected += async (_, _) =>
         {
-            var date = PickerDate(_datePicker);
-            _fromPicker.Date = date.AddDays(-6);
-            _toPicker.Date = date;
             await LoadReportsAsync();
         };
+        _rangePresetPicker.Items.Add("Hôm nay");
+        _rangePresetPicker.Items.Add("Hôm qua");
+        _rangePresetPicker.Items.Add("7 ngày gần nhất");
+        _rangePresetPicker.Items.Add("Tháng trước");
+        _rangePresetPicker.Items.Add("Tùy chọn");
+        _rangePresetPicker.SelectedIndexChanged += async (_, _) =>
+        {
+            ApplyRangePreset();
+            await LoadRangeAsync(silent: true);
+        };
+        _fromPicker.DateSelected += (_, _) => MarkCustomRange();
+        _toPicker.DateSelected += (_, _) => MarkCustomRange();
+        _rangePresetPicker.SelectedIndex = 2;
 
         _homeView    = BuildHomeView();
         _tablesView  = BuildTablesView();
@@ -215,12 +228,16 @@ public sealed class DashboardPage : ContentPage
             {
                 new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
                 new RowDefinition(GridLength.Auto)
             }
         };
-        rangeGrid.Add(InputShell(_fromPicker), 0, 0);
-        rangeGrid.Add(InputShell(_toPicker), 1, 0);
-        rangeGrid.Add(_rangeButton, 0, 1);
+        var presetShell = InputShell(_rangePresetPicker);
+        rangeGrid.Add(presetShell, 0, 0);
+        Grid.SetColumnSpan(presetShell, 2);
+        rangeGrid.Add(InputShell(_fromPicker), 0, 1);
+        rangeGrid.Add(InputShell(_toPicker), 1, 1);
+        rangeGrid.Add(_rangeButton, 0, 2);
         Grid.SetColumnSpan(_rangeButton, 2);
         var rangeSummary = new VerticalStackLayout
         {
@@ -231,7 +248,7 @@ public sealed class DashboardPage : ContentPage
                 _rangeRevenue, _rangeInvoices, _rangePayments
             }
         };
-        rangeGrid.Add(rangeSummary, 0, 2);
+        rangeGrid.Add(rangeSummary, 0, 3);
         Grid.SetColumnSpan(rangeSummary, 2);
 
         _refreshView.Content = new MauiScrollView
@@ -418,6 +435,45 @@ public sealed class DashboardPage : ContentPage
         }
     }
 
+    private void ApplyRangePreset()
+    {
+        var today = DateTime.Today;
+        _updatingRangePreset = true;
+        switch (_rangePresetPicker.SelectedIndex)
+        {
+            case 0:
+                _fromPicker.Date = today;
+                _toPicker.Date = today;
+                break;
+            case 1:
+                _fromPicker.Date = today.AddDays(-1);
+                _toPicker.Date = today.AddDays(-1);
+                break;
+            case 3:
+                var firstThisMonth = new DateTime(today.Year, today.Month, 1);
+                _fromPicker.Date = firstThisMonth.AddMonths(-1);
+                _toPicker.Date = firstThisMonth.AddDays(-1);
+                break;
+            case 2:
+                _fromPicker.Date = today.AddDays(-6);
+                _toPicker.Date = today;
+                break;
+            default:
+                break;
+        }
+        _updatingRangePreset = false;
+    }
+
+    private void MarkCustomRange()
+    {
+        if (_updatingRangePreset)
+        {
+            return;
+        }
+
+        _rangePresetPicker.SelectedIndex = 4;
+    }
+
     // ── summary cards ─────────────────────────────────────────────────────
     private View SummaryGrid()
     {
@@ -535,15 +591,7 @@ public sealed class DashboardPage : ContentPage
             var requestedDate = PickerDate(_datePicker);
             var today = await _api.TodayAsync(requestedDate, _session.StoreId);
             var month = await _api.MonthAsync(requestedDate, _session.StoreId);
-            var reportDate = ResolveReportDate(requestedDate, today, month);
-            if (reportDate.Date != requestedDate.Date)
-            {
-                today = await _api.TodayAsync(reportDate, _session.StoreId);
-            }
-
-            var fromDate = reportDate.AddDays(-6);
-            var top = await _api.TopProductsAsync(fromDate, reportDate, _session.StoreId);
-            var invoices = await _api.InvoicesAsync(fromDate, reportDate, _session.StoreId);
+            var latestDataDate = ResolveLatestDataDate(requestedDate, today, month);
             OpenTablesReport? openTables = null;
             string openTablesError = string.Empty;
             try
@@ -555,9 +603,9 @@ public sealed class DashboardPage : ContentPage
                 openTablesError = tableEx.Message;
             }
 
-            var dateNote = reportDate.Date == requestedDate.Date
+            var dateNote = latestDataDate.Date == requestedDate.Date
                 ? string.Empty
-                : $" • Dữ liệu gần nhất: {reportDate:dd/MM/yyyy}";
+                : $" • Dữ liệu gần nhất: {latestDataDate:dd/MM/yyyy}";
             _syncStatus.Text = today.LastSyncAt is null
                 ? "Chưa có lần đồng bộ cloud" + dateNote
                 : $"Đồng bộ: {today.LastSyncAt:dd/MM/yyyy HH:mm}{dateNote}";
@@ -567,8 +615,6 @@ public sealed class DashboardPage : ContentPage
             _cancelled.Text = today.Summary.CancelledInvoiceCount.ToString("N0");
             RenderDaily(today.Revenue7Days.Count > 0 ? today.Revenue7Days : month.Daily, month.Daily);
             RenderPayment(today.PaymentBreakdown);
-            RenderTop(top.Items);
-            RenderInvoices(invoices.Items);
             RenderTables(openTables, openTablesError);
             await LoadRangeAsync(silent: true);
             UpdateOfflineBanner();
@@ -581,7 +627,7 @@ public sealed class DashboardPage : ContentPage
         }
     }
 
-    private static DateTime ResolveReportDate(DateTime requestedDate, TodayReport today, MonthReport month)
+    private static DateTime ResolveLatestDataDate(DateTime requestedDate, TodayReport today, MonthReport month)
     {
         if (today.Summary.InvoiceCount > 0 || today.Summary.Revenue > 0)
         {
@@ -614,10 +660,14 @@ public sealed class DashboardPage : ContentPage
         {
             _rangeButton.IsEnabled = false;
             var range = await _api.RangeAsync(from, to, _session.StoreId);
+            var top = await _api.TopProductsAsync(from, to, _session.StoreId);
+            var invoices = await _api.InvoicesAsync(from, to, _session.StoreId);
             _rangeRevenue.Text = RevenueApiClient.Money(range.Summary.Revenue);
             _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hủy";
             _rangePayments.Text =
                 $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}\nThẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
+            RenderTop(top.Items);
+            RenderInvoices(invoices.Items);
             UpdateOfflineBanner();
         }
         catch (Exception ex)

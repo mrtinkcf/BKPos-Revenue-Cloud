@@ -8,6 +8,8 @@ public sealed class RevenueSessionStore
     private const string TenantIdKey = "revenue_tenant_id";
     private const string StoreIdKey = "revenue_store_id";
     private const string UsernameKey = "revenue_username";
+    private const string RememberCredentialsKey = "revenue_remember_credentials";
+    private const string SavedPasswordKey = "revenue_saved_password";
     private const string AccessTokenKey = "revenue_access_token";
     private const string RefreshTokenKey = "revenue_refresh_token";
 
@@ -35,6 +37,12 @@ public sealed class RevenueSessionStore
         set => Preferences.Default.Set(UsernameKey, value.Trim());
     }
 
+    public bool RememberCredentials
+    {
+        get => Preferences.Default.Get(RememberCredentialsKey, false);
+        set => Preferences.Default.Set(RememberCredentialsKey, value);
+    }
+
     public async Task SaveTokensAsync(string accessToken, string refreshToken)
     {
         await SecureStorage.Default.SetAsync(AccessTokenKey, accessToken);
@@ -47,6 +55,20 @@ public sealed class RevenueSessionStore
     public async Task<string> GetRefreshTokenAsync()
         => await SecureStorage.Default.GetAsync(RefreshTokenKey) ?? string.Empty;
 
+    public async Task SavePasswordAsync(string password)
+        => await SecureStorage.Default.SetAsync(SavedPasswordKey, password);
+
+    public async Task<string> GetSavedPasswordAsync()
+        => await SecureStorage.Default.GetAsync(SavedPasswordKey) ?? string.Empty;
+
+    public void ClearSavedPassword()
+    {
+        SecureStorage.Default.Remove(SavedPasswordKey);
+    }
+
+    public async Task<bool> HasSessionAsync()
+        => !string.IsNullOrWhiteSpace(await GetRefreshTokenAsync());
+
     public void ClearTokens()
     {
         SecureStorage.Default.Remove(AccessTokenKey);
@@ -58,6 +80,8 @@ public sealed class RevenueSessionStore
         ClearTokens();
         Preferences.Default.Remove(StoreIdKey);
         Preferences.Default.Remove(UsernameKey);
+        Preferences.Default.Remove(RememberCredentialsKey);
+        ClearSavedPassword();
     }
 
     private static string NormalizeUrl(string value)

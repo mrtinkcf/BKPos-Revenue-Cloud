@@ -19,6 +19,7 @@ public sealed class SettingsPage : ContentPage
         _session = session;
         BackgroundColor = AppColors.Surface;
         MauiNavigationPage.SetHasNavigationBar(this, false);
+        HideSoftInputOnTapped = true;
         On<iOS>().SetUseSafeArea(true);
         Build();
         Load();
