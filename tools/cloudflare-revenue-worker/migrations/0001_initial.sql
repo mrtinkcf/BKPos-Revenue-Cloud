@@ -133,6 +133,40 @@ CREATE TABLE IF NOT EXISTS invoice_payment_lines (
     PRIMARY KEY (tenant_id, store_id, invoice_id, payment_id)
 );
 
+CREATE TABLE IF NOT EXISTS open_tables (
+    tenant_id TEXT NOT NULL,
+    store_id TEXT NOT NULL,
+    table_id TEXT NOT NULL,
+    table_name TEXT NOT NULL DEFAULT '',
+    zone_id TEXT NOT NULL DEFAULT '',
+    zone_name TEXT NOT NULL DEFAULT '',
+    order_id TEXT NOT NULL DEFAULT '',
+    occupied_at TEXT,
+    total INTEGER NOT NULL DEFAULT 0,
+    modified_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    synced_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY (tenant_id, store_id, table_id)
+);
+
+CREATE TABLE IF NOT EXISTS open_table_items (
+    tenant_id TEXT NOT NULL,
+    store_id TEXT NOT NULL,
+    table_id TEXT NOT NULL,
+    order_id TEXT NOT NULL DEFAULT '',
+    line_id TEXT NOT NULL,
+    product_id TEXT NOT NULL DEFAULT '',
+    product_name TEXT NOT NULL DEFAULT '',
+    product_type TEXT NOT NULL DEFAULT 'other',
+    unit_name TEXT NOT NULL DEFAULT '',
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price INTEGER NOT NULL DEFAULT 0,
+    line_total INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    synced_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY (tenant_id, store_id, table_id, line_id)
+);
+
 CREATE TABLE IF NOT EXISTS daily_revenue_snapshots (
     tenant_id TEXT NOT NULL,
     store_id TEXT NOT NULL,
@@ -164,5 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_store_date ON invoices (tenant_id, store
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices (tenant_id, store_id, status);
 CREATE INDEX IF NOT EXISTS idx_items_product ON invoice_items (tenant_id, store_id, product_id, product_name);
 CREATE INDEX IF NOT EXISTS idx_payments_method ON invoice_payment_lines (tenant_id, store_id, method);
+CREATE INDEX IF NOT EXISTS idx_open_tables_active ON open_tables (tenant_id, store_id, active);
+CREATE INDEX IF NOT EXISTS idx_open_table_items_table ON open_table_items (tenant_id, store_id, table_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON manager_sessions (tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_nonces_expires ON sync_nonces (expires_at);

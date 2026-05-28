@@ -742,10 +742,15 @@ public sealed class DashboardPage : ContentPage
                 ? opened
                 : $"{zone} • {opened}";
 
-            _tablesPanel.Add(ListRow(
+            var row = ListRow(
                 $"{table.TableName} — {RevenueApiClient.Money(table.Total)}",
                 subtitle,
-                showChevron: false));
+                showChevron: true);
+            var selectedTable = table;
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += async (_, _) => await Navigation.PushAsync(new OpenTableDetailPage(selectedTable));
+            row.GestureRecognizers.Add(tap);
+            _tablesPanel.Add(row);
         }
 
         if (_tablesPanel.Children.Count == 0)

@@ -50,6 +50,22 @@ test("GET /reports/top-products response matches contract", async () => {
   assert.deepEqual(Object.keys(response.items[0]).sort(), ["productId", "productName", "productType", "quantity", "revenue"].sort());
 });
 
+test("GET /reports/open-tables response matches contract", async () => {
+  const response = await __test.reportOpenTables(mockEnv(), store);
+
+  assert.equal(response.storeId, "STORE-001");
+  assert.equal(typeof response.tableCount, "number");
+  assert.equal(typeof response.estimatedTotal, "number");
+  assert.ok(Array.isArray(response.tables));
+  assert.deepEqual(
+    Object.keys(response.tables[0]).sort(),
+    ["tableId", "tableName", "zoneId", "zoneName", "orderId", "occupiedAt", "total", "modifiedAt", "syncedAt", "items"].sort());
+  assert.ok(Array.isArray(response.tables[0].items));
+  assert.deepEqual(
+    Object.keys(response.tables[0].items[0]).sort(),
+    ["lineId", "productId", "productName", "productType", "unitName", "quantity", "unitPrice", "lineTotal", "note"].sort());
+});
+
 test("GET /invoices list response matches contract", async () => {
   const response = await __test.invoiceList(mockEnv(), store, new URLSearchParams("from=2026-05-01&to=2026-05-20&page=1&pageSize=50"));
 
@@ -234,6 +250,44 @@ class MockStatement {
 
     if (sql.includes("select invoice_id,invoice_version,status")) {
       return { results: [invoiceRow()] };
+    }
+
+    if (sql.includes("from open_tables where")) {
+      return {
+        results: [
+          {
+            table_id: "A1",
+            table_name: "Bàn A1",
+            zone_id: "KHU-A",
+            zone_name: "Khu A",
+            order_id: "ORD-001",
+            occupied_at: "2026-05-20T08:00:00+07:00",
+            total: 125000,
+            modified_at: "2026-05-20T08:15:00+07:00",
+            synced_at: "2026-05-20T08:16:00+07:00"
+          }
+        ]
+      };
+    }
+
+    if (sql.includes("from open_table_items")) {
+      return {
+        results: [
+          {
+            table_id: "A1",
+            order_id: "ORD-001",
+            line_id: "LINE-001",
+            product_id: "B52",
+            product_name: "B52",
+            product_type: "drink",
+            unit_name: "ly",
+            quantity: 1,
+            unit_price: 30000,
+            line_total: 30000,
+            note: "ít đá"
+          }
+        ]
+      };
     }
 
     if (sql.includes("from invoice_items where")) {

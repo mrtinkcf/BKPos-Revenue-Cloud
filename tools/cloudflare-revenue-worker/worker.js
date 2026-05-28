@@ -20,10 +20,15 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "OPTIONS") return json({}, 204);
+      if (request.method === "GET" && url.pathname === "/privacy") return privacyPolicy();
 
       if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/provision") {
         requireAdmin(request, env);
         return json(await provision(env, await readJson(request)));
+      }
+      if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/manager-user") {
+        requireAdmin(request, env);
+        return json(await upsertManagerUser(env, await readJson(request)));
       }
       if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/revoke") {
         requireAdmin(request, env);
@@ -43,6 +48,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/sync/invoices/batch") {
         const { ctx, body } = await readSignedJson(request, env);
         return json(await syncInvoices(env, ctx, Array.isArray(body.invoices) ? body.invoices : []));
+      }
+
+      if (request.method === "POST" && url.pathname === "/sync/open-tables/batch") {
+        const { ctx, body } = await readSignedJson(request, env);
+        return json(await syncOpenTables(env, ctx, Array.isArray(body.tables) ? body.tables : []));
       }
 
       const syncOne = url.pathname.match(/^\/sync\/invoices\/([^/]+)$/);
@@ -99,6 +109,12 @@ export default {
         return json(await topProducts(env, store, reqDate(url.searchParams.get("from"), "from"), reqDate(url.searchParams.get("to"), "to"), clamp(url.searchParams.get("limit"), 1, 100, 20)));
       }
 
+      if (request.method === "GET" && url.pathname === "/reports/open-tables") {
+        const s = await manager(request, env);
+        const store = await reportStore(env, s.tenant_id, url.searchParams.get("storeId"));
+        return json(await reportOpenTables(env, store));
+      }
+
       if (request.method === "GET" && url.pathname === "/invoices") {
         const s = await manager(request, env);
         const store = await reportStore(env, s.tenant_id, url.searchParams.get("storeId"));
@@ -150,6 +166,27 @@ async function setRevenueCloudEnabled(env, b, enabled) {
   ]);
   await audit(env, tenantId, storeId, "admin", enabled ? "unrevoke_revenue_cloud" : "revoke_revenue_cloud", enabled ? "Revenue Cloud enabled." : "Revenue Cloud revoked.");
   return { ok: true, tenantId, storeId, revenueCloudEnabled: enabled };
+}
+
+async function upsertManagerUser(env, b) {
+  const tenantId = text(b.tenantId);
+  const storeId = text(b.storeId);
+  const username = text(b.managerUsername || b.username);
+  const password = String(b.managerPassword ?? b.password ?? "");
+  const displayName = text(b.managerDisplayName || b.displayName || username);
+  if (!tenantId || !username || !password) bad("invalid_manager_user");
+
+  const tenant = await env.DB.prepare("SELECT tenant_id FROM tenants WHERE tenant_id=? AND enabled=1").bind(tenantId).first();
+  if (!tenant) notFound("tenant_not_found");
+
+  if (storeId) {
+    const store = await getStore(env, tenantId, storeId);
+    if (!store) notFound("store_not_found");
+  }
+
+  await upsertUser(env, tenantId, username, password, displayName);
+  await audit(env, tenantId, storeId, "admin", "upsert_manager_user", `Manager user ${username.toLowerCase()} upserted.`);
+  return { ok: true, tenantId, storeId, username: username.toLowerCase(), displayName };
 }
 
 async function upsertUser(env, tenantId, username, password, displayName) {
@@ -217,6 +254,41 @@ async function syncInvoices(env, ctx, invoices) {
   return { ok: failed === 0, accepted, ignored, failed, errors, affectedDates: [...dates] };
 }
 
+async function syncOpenTables(env, ctx, tables) {
+  const syncAt = now();
+  let accepted = 0, failed = 0; const errors = [];
+  for (const raw of tables) {
+    try {
+      const x = normOpenTable(raw);
+      await env.DB.prepare(`INSERT INTO open_tables (tenant_id,store_id,table_id,table_name,zone_id,zone_name,order_id,occupied_at,total,modified_at,active,synced_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,1,?)
+        ON CONFLICT(tenant_id,store_id,table_id) DO UPDATE SET table_name=excluded.table_name,zone_id=excluded.zone_id,zone_name=excluded.zone_name,order_id=excluded.order_id,occupied_at=excluded.occupied_at,total=excluded.total,modified_at=excluded.modified_at,active=1,synced_at=excluded.synced_at`)
+        .bind(ctx.tenantId, ctx.storeId, x.tableId, x.tableName, x.zoneId, x.zoneName, x.orderId, x.occupiedAt, x.total, x.modifiedAt, syncAt).run();
+      await env.DB.prepare("DELETE FROM open_table_items WHERE tenant_id=? AND store_id=? AND table_id=?")
+        .bind(ctx.tenantId, ctx.storeId, x.tableId).run();
+      for (const it of x.items) {
+        await env.DB.prepare(`INSERT INTO open_table_items (tenant_id,store_id,table_id,order_id,line_id,product_id,product_name,product_type,unit_name,quantity,unit_price,line_total,note,synced_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .bind(ctx.tenantId, ctx.storeId, x.tableId, x.orderId, it.lineId, it.productId, it.productName, it.productType, it.unitName, it.quantity, it.unitPrice, it.lineTotal, it.note, syncAt).run();
+      }
+      accepted++;
+    } catch (e) {
+      failed++;
+      errors.push({ tableId: text(raw?.tableId), error: String(e?.message || e) });
+    }
+  }
+
+  if (failed === 0) {
+    await env.DB.prepare("UPDATE open_tables SET active=0,synced_at=? WHERE tenant_id=? AND store_id=? AND active=1 AND synced_at<>?")
+      .bind(syncAt, ctx.tenantId, ctx.storeId, syncAt).run();
+  }
+
+  await env.DB.prepare("UPDATE stores SET last_sync_at=?,last_error=?,updated_at=? WHERE tenant_id=? AND store_id=?")
+    .bind(syncAt, failed ? `Failed ${failed} open table(s).` : null, syncAt, ctx.tenantId, ctx.storeId).run();
+  await logSync(env, ctx.tenantId, ctx.storeId, "open_tables_batch", `accepted=${accepted};failed=${failed}`, "");
+  return { ok: failed === 0, accepted, failed, errors, syncedAt: syncAt };
+}
+
 async function upsertInvoice(env, ctx, raw, dates) {
   const x = normInvoice(ctx, raw);
   const old = await env.DB.prepare("SELECT invoice_version,business_date FROM invoices WHERE tenant_id=? AND store_id=? AND invoice_id=?").bind(ctx.tenantId, ctx.storeId, x.invoiceId).first();
@@ -262,6 +334,23 @@ function normItems(items) {
   });
 }
 
+function normOpenTable(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("invalid_table_payload");
+  const tableId = text(raw.tableId); if (!tableId) throw new Error("missing_table_id");
+  const orderId = text(raw.orderId); if (!orderId) throw new Error("missing_order_id");
+  return {
+    tableId,
+    tableName: text(raw.tableName) || tableId,
+    zoneId: text(raw.zoneId),
+    zoneName: text(raw.zoneName),
+    orderId,
+    occupiedAt: iso(raw.occupiedAt),
+    total: money(raw.total),
+    modifiedAt: iso(raw.modifiedAt) || now(),
+    items: normItems(raw.items)
+  };
+}
+
 async function recomputeDay(env, tenantId, storeId, d) {
   const s = await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN status IN ('paid','edited') THEN total ELSE 0 END),0) revenue,COALESCE(SUM(CASE WHEN status IN ('paid','edited') THEN 1 ELSE 0 END),0) invoice_count,COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) cancelled_invoice_count FROM invoices WHERE tenant_id=? AND store_id=? AND business_date=?").bind(tenantId, storeId, d).first();
   const p = await payBreak(env, tenantId, storeId, d, d);
@@ -276,6 +365,51 @@ async function reportToday(env, store, d, source) {
 }
 async function reportRange(env, store, from, to) { return { from, to, summary: await summary(env, store, from, to), daily: await daily(env, store, from, to), paymentBreakdown: await payBreakArray(env, store, from, to) }; }
 async function reportMonth(env, store, month) { const from = `${month}-01`, to = addDays(nextMonth(month), -1); return { month, timezone: store.timezone, summary: await summary(env, store, from, to), daily: await daily(env, store, from, to), paymentBreakdown: await payBreakArray(env, store, from, to) }; }
+async function reportOpenTables(env, store) {
+  const r = await env.DB.prepare("SELECT table_id,table_name,zone_id,zone_name,order_id,occupied_at,total,modified_at,synced_at FROM open_tables WHERE tenant_id=? AND store_id=? AND active=1 ORDER BY occupied_at,table_name")
+    .bind(store.tenant_id, store.store_id).all();
+  const itemRows = await env.DB.prepare(`SELECT oi.table_id,oi.order_id,oi.line_id,oi.product_id,oi.product_name,oi.product_type,oi.unit_name,oi.quantity,oi.unit_price,oi.line_total,oi.note
+    FROM open_table_items oi
+    JOIN open_tables ot ON ot.tenant_id=oi.tenant_id AND ot.store_id=oi.store_id AND ot.table_id=oi.table_id
+    WHERE oi.tenant_id=? AND oi.store_id=? AND ot.active=1
+    ORDER BY oi.table_id,oi.line_id`)
+    .bind(store.tenant_id, store.store_id).all();
+  const itemsByTable = new Map();
+  for (const x of itemRows.results || []) {
+    const key = x.table_id || "";
+    if (!itemsByTable.has(key)) itemsByTable.set(key, []);
+    itemsByTable.get(key).push({
+      lineId: x.line_id || "",
+      productId: x.product_id || "",
+      productName: x.product_name || "",
+      productType: prodType(x.product_type),
+      unitName: x.unit_name || "",
+      quantity: Number(x.quantity || 0),
+      unitPrice: Number(x.unit_price || 0),
+      lineTotal: Number(x.line_total || 0),
+      note: x.note || ""
+    });
+  }
+  const rows = (r.results || []).map(x => ({
+    tableId: x.table_id || "",
+    tableName: x.table_name || "",
+    zoneId: x.zone_id || "",
+    zoneName: x.zone_name || "",
+    orderId: x.order_id || "",
+    occupiedAt: x.occupied_at || null,
+    total: Number(x.total || 0),
+    modifiedAt: x.modified_at || null,
+    syncedAt: x.synced_at || null,
+    items: itemsByTable.get(x.table_id || "") || []
+  }));
+  return {
+    storeId: store.store_id,
+    lastSyncAt: store.last_sync_at || null,
+    tableCount: rows.length,
+    estimatedTotal: rows.reduce((sum, row) => sum + Number(row.total || 0), 0),
+    tables: rows
+  };
+}
 async function summary(env, store, from, to) {
   const r = await env.DB.prepare("SELECT COALESCE(SUM(CASE WHEN status IN ('paid','edited') THEN total ELSE 0 END),0) revenue,COALESCE(SUM(CASE WHEN status IN ('paid','edited') THEN 1 ELSE 0 END),0) invoice_count,COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) cancelled_invoice_count FROM invoices WHERE tenant_id=? AND store_id=? AND business_date>=? AND business_date<=?").bind(store.tenant_id, store.store_id, from, to).first();
   const p = await payBreak(env, store.tenant_id, store.store_id, from, to); const count = Number(r?.invoice_count || 0), rev = Number(r?.revenue || 0);
@@ -371,6 +505,67 @@ function hex(bytes) { return [...bytes].map(b => b.toString(16).padStart(2, "0")
 function ctEqual(a, b) { if (a.length !== b.length) return false; let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i); return d === 0; }
 function token(n) { const b = new Uint8Array(n); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
 function json(p, status = 200) { return new Response(JSON.stringify(p), { status, headers: H }); }
+function privacyPolicy() {
+  return new Response(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BKPos Revenue Privacy Policy</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55;color:#142033;background:#f7f9fc;margin:0}
+    main{max-width:820px;margin:0 auto;padding:40px 20px}
+    article{background:#fff;border:1px solid #dbe4f0;border-radius:16px;padding:28px;box-shadow:0 8px 28px rgba(20,32,51,.08)}
+    h1{margin-top:0;color:#0b2034}
+    h2{margin-top:28px;color:#153f73}
+    p,li{font-size:16px}
+    .muted{color:#5c6b80}
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <h1>BKPos Revenue Privacy Policy</h1>
+      <p class="muted">Last updated: May 23, 2026</p>
+      <p>BKPos Revenue is a business reporting application used by restaurant and coffee shop owners to view revenue reports synchronized from the BKPos system.</p>
+
+      <h2>Information We Process</h2>
+      <p>The app may display business data such as store name, revenue totals, invoices, payment summaries, and product sales reports. This data is provided by the store owner's BKPos system or by a demo cloud account for Apple review.</p>
+
+      <h2>Account Information</h2>
+      <p>Users sign in with credentials issued by the BKPos provider or store administrator. Passwords are transmitted over HTTPS and are not stored in plain text by the cloud service.</p>
+
+      <h2>Information We Do Not Collect</h2>
+      <ul>
+        <li>We do not collect contacts, photos, camera data, microphone data, or precise location.</li>
+        <li>We do not use third-party advertising SDKs.</li>
+        <li>We do not sell personal information.</li>
+      </ul>
+
+      <h2>Data Usage</h2>
+      <p>Business data is used only to provide reporting features to authorized users, including daily revenue, monthly revenue, payment breakdowns, top products, and invoice details.</p>
+
+      <h2>Data Security</h2>
+      <p>Communication between the app and BKPos cloud endpoints uses HTTPS. Synchronization requests are protected with signed requests to reduce unauthorized access.</p>
+
+      <h2>Data Retention</h2>
+      <p>Business data is retained for reporting purposes until the store owner requests deletion or disables the cloud reporting feature.</p>
+
+      <h2>Contact</h2>
+      <p><strong>Bao Khang Laptop</strong><br>
+      Phone/Zalo: 0396 529 103<br>
+      Email: tinhthanhdo1990@gmail.com</p>
+    </article>
+  </main>
+</body>
+</html>`, {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "public, max-age=3600"
+    }
+  });
+}
 function bad(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 400, headers: H }); }
 function unauth(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 401, headers: H }); }
 function notFound(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 404, headers: H }); }
@@ -397,6 +592,7 @@ export const __test = {
   reportRange,
   reportMonth,
   topProducts,
+  reportOpenTables,
   invoiceList,
   invoiceDetail
 };

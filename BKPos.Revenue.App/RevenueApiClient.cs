@@ -274,7 +274,8 @@ public sealed record PaymentSlice(string Method, decimal Amount);
 public sealed record TopProductsResponse(string From, string To, List<TopProductDto> Items);
 public sealed record TopProductDto(string ProductId, string ProductName, string ProductType, decimal Quantity, decimal Revenue);
 public sealed record OpenTablesReport(string StoreId, DateTimeOffset? LastSyncAt, int TableCount, decimal EstimatedTotal, List<OpenTableDto> Tables);
-public sealed record OpenTableDto(string TableId, string TableName, string ZoneId, string ZoneName, string OrderId, DateTimeOffset? OccupiedAt, decimal Total, DateTimeOffset? ModifiedAt, DateTimeOffset? SyncedAt);
+public sealed record OpenTableDto(string TableId, string TableName, string ZoneId, string ZoneName, string OrderId, DateTimeOffset? OccupiedAt, decimal Total, DateTimeOffset? ModifiedAt, DateTimeOffset? SyncedAt, List<OpenTableItemDto>? Items);
+public sealed record OpenTableItemDto(string LineId, string ProductId, string ProductName, string ProductType, string UnitName, decimal Quantity, decimal UnitPrice, decimal LineTotal, string Note);
 public sealed record InvoiceListResponse(int Page, int PageSize, int TotalItems, List<InvoiceListItem> Items);
 public sealed record InvoiceListItem(string InvoiceId, int InvoiceVersion, string Status, string BusinessDate, string TableName, string Cashier, DateTimeOffset? PaidAt, decimal Subtotal, decimal Discount, decimal Total, string PaymentMethod);
 public sealed record InvoiceDetailResponse(

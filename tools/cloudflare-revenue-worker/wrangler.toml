@@ -9,4 +9,4 @@ DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
 [[d1_databases]]
 binding = "DB"
 database_name = "bkpos-revenue-cloud"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "ab9fefd8-85b4-49cc-a3d5-886366bae8d4"
