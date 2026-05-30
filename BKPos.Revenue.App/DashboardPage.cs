@@ -782,16 +782,7 @@ public sealed class DashboardPage : ContentPage
         try
         {
             var invoice = await _api.InvoiceDetailAsync(invoiceId, _session.StoreId);
-            var payments = invoice.Payments.Count == 0
-                ? "Không có thông tin thanh toán"
-                : string.Join("\n", invoice.Payments.Select(x => $"{PaymentLabel(x.Method)}: {RevenueApiClient.Money(x.Amount)}"));
-            var items = invoice.Items.Count == 0
-                ? "Không có món"
-                : string.Join("\n", invoice.Items.Select(x => $"{x.ProductName} x{x.Quantity:N0}: {RevenueApiClient.Money(x.LineTotal)}"));
-            await DisplayAlert(
-                $"{invoice.TableName} — {RevenueApiClient.Money(invoice.Total)}",
-                $"Ngày: {invoice.BusinessDate}\nTrạng thái: {StatusLabel(invoice.Status)}\n\nThanh toán:\n{payments}\n\nMón:\n{items}",
-                "Đóng");
+            await Navigation.PushAsync(new InvoiceDetailPage(invoice));
         }
         catch (Exception ex)
         {
