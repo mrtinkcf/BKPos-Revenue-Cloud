@@ -726,7 +726,7 @@ public sealed class DashboardPage : ContentPage
 
     private void InvalidateChartsSoon()
     {
-        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(80), () =>
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(250), () =>
         {
             _lineChart.Invalidate();
             _pieChart.Invalidate();
@@ -915,7 +915,7 @@ public sealed class DashboardPage : ContentPage
     {
         _dailyPanel.Clear();
         var max = points.Count == 0 ? 1 : Math.Max(1, points.Max(p => p.Revenue));
-        _lineDrawable.Points = monthPoints;
+        _lineDrawable.Points = points.Count > 0 ? points : monthPoints;
         _lineChart.Invalidate();
         foreach (var p in points.TakeLast(7))
             _dailyPanel.Add(BarRow(ShortDate(p.Date), p.Revenue, max, AppColors.Blue));
@@ -1158,9 +1158,10 @@ internal sealed class RevenueLineDrawable : IDrawable
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
+        if (dirtyRect.Width <= 0 || dirtyRect.Height <= 0) return;
         canvas.FillColor = Color.FromArgb("#F8FAFC");
         canvas.FillRoundedRectangle(dirtyRect, 14);
-        if (Points.Count == 0) { DrawEmpty(canvas, dirtyRect, "Chưa có dữ liệu tháng"); return; }
+        if (Points.Count == 0) { DrawEmpty(canvas, dirtyRect, "Chưa có dữ liệu"); return; }
 
         var max = Math.Max(1, Points.Max(p => p.Revenue));
         var left = dirtyRect.Left + 14;
@@ -1199,6 +1200,7 @@ internal sealed class PaymentPieDrawable : IDrawable
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
+        if (dirtyRect.Width <= 0 || dirtyRect.Height <= 0) return;
         canvas.FillColor = Color.FromArgb("#F8FAFC");
         canvas.FillRoundedRectangle(dirtyRect, 14);
         var rows = Slices.Where(s => s.Amount > 0).ToList();
