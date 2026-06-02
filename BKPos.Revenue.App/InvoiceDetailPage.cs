@@ -8,10 +8,12 @@ namespace BKPos.Revenue.App;
 public sealed class InvoiceDetailPage : ContentPage
 {
     private readonly InvoiceDetailResponse _invoice;
+    private readonly string _timezone;
 
-    public InvoiceDetailPage(InvoiceDetailResponse invoice)
+    public InvoiceDetailPage(InvoiceDetailResponse invoice, string? timezone = null)
     {
         _invoice = invoice;
+        _timezone = string.IsNullOrWhiteSpace(timezone) ? "Asia/Ho_Chi_Minh" : timezone;
         BackgroundColor = AppColors.Surface;
         HideSoftInputOnTapped = true;
         MauiNavigationPage.SetHasNavigationBar(this, false);
@@ -216,7 +218,7 @@ public sealed class InvoiceDetailPage : ContentPage
                     {
                         new Label
                         {
-                            Text = $"{PaymentLabel(payment.Method)} • {FormatDateTime(payment.CreatedAt)}",
+                            Text = $"{PaymentLabel(payment.Method)} • {FormatDateTime(payment.CreatedAt, _timezone)}",
                             TextColor = AppColors.Navy,
                             FontSize = AppUi.S(13),
                             LineBreakMode = LineBreakMode.TailTruncation
@@ -369,8 +371,8 @@ public sealed class InvoiceDetailPage : ContentPage
             ? date.ToString("dd/MM/yyyy", CultureInfo.GetCultureInfo("vi-VN"))
             : Safe(value);
 
-    private static string FormatDateTime(DateTimeOffset? value)
-        => value is null ? "-" : value.Value.ToLocalTime().ToString("HH:mm dd/MM/yyyy", CultureInfo.GetCultureInfo("vi-VN"));
+    private static string FormatDateTime(DateTimeOffset? value, string timezone)
+        => RevenueTime.FormatStore(value, timezone, "HH:mm dd/MM/yyyy");
 
     private static string PaymentLabel(string value)
         => Safe(value).ToLowerInvariant() switch

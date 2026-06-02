@@ -21,6 +21,9 @@ public sealed class DashboardPage : ContentPage
     private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiPicker _rangePresetPicker = new() { Title = "Chọn khoảng báo cáo", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _invoiceFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _invoiceToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiPicker _invoicePresetPicker = new() { Title = "Lọc hóa đơn", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
     private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
     private readonly Label _revenue = ValueLabel(AppUi.S(28), AppColors.Blue);
@@ -34,6 +37,7 @@ public sealed class DashboardPage : ContentPage
     private readonly VerticalStackLayout _dailyPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _topPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _invoicePanel = new() { Spacing = 8 };
+    private readonly Label _invoicePageInfo = new() { TextColor = AppColors.Muted, FontSize = AppUi.S(12) };
     private readonly RevenueLineDrawable _lineDrawable = new();
     private readonly PaymentPieDrawable _pieDrawable = new();
     private readonly GraphicsView _lineChart;
@@ -48,11 +52,43 @@ public sealed class DashboardPage : ContentPage
         FontSize = AppUi.S(14),
         FontAttributes = FontAttributes.Bold
     };
+    private readonly Button _invoiceFilterButton = new()
+    {
+        Text = "Lọc hóa đơn",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 12,
+        HeightRequest = AppUi.S(44),
+        FontSize = AppUi.S(13),
+        FontAttributes = FontAttributes.Bold
+    };
+    private readonly Button _invoicePrevButton = new()
+    {
+        Text = "Trước",
+        BackgroundColor = Color.FromArgb("#E2E8F0"),
+        TextColor = AppColors.Navy,
+        CornerRadius = 10,
+        HeightRequest = AppUi.S(40),
+        FontSize = AppUi.S(12)
+    };
+    private readonly Button _invoiceNextButton = new()
+    {
+        Text = "Tiếp",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 10,
+        HeightRequest = AppUi.S(40),
+        FontSize = AppUi.S(12)
+    };
     private readonly RefreshView _refreshView = new();
     private readonly IDispatcherTimer? _autoRefreshTimer;
+    private const int InvoicePageSize = 20;
     private bool _loading;
     private bool _updatingRangePreset;
+    private bool _updatingInvoicePreset;
+    private int _invoicePage = 1;
     private List<StoreDto> _stores = [];
+    private string _storeTimezone = "Asia/Ho_Chi_Minh";
 
     // ── header action buttons ─────────────────────────────────────────────
     private readonly Button _refreshButton = new()
@@ -128,6 +164,22 @@ public sealed class DashboardPage : ContentPage
         _refreshButton.Clicked += async (_, _) => await LoadAsync();
         _logoutButton.Clicked += async (_, _) => await LogoutAsync();
         _rangeButton.Clicked += async (_, _) => await LoadRangeAsync();
+        _invoiceFilterButton.Clicked += async (_, _) =>
+        {
+            _invoicePage = 1;
+            await LoadInvoicesAsync();
+        };
+        _invoicePrevButton.Clicked += async (_, _) =>
+        {
+            if (_invoicePage <= 1) return;
+            _invoicePage--;
+            await LoadInvoicesAsync();
+        };
+        _invoiceNextButton.Clicked += async (_, _) =>
+        {
+            _invoicePage++;
+            await LoadInvoicesAsync();
+        };
         _refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
         _datePicker.DateSelected += async (_, _) =>
         {
@@ -146,6 +198,21 @@ public sealed class DashboardPage : ContentPage
         _fromPicker.DateSelected += (_, _) => MarkCustomRange();
         _toPicker.DateSelected += (_, _) => MarkCustomRange();
         _rangePresetPicker.SelectedIndex = 2;
+
+        _invoicePresetPicker.Items.Add("Hôm nay");
+        _invoicePresetPicker.Items.Add("Hôm qua");
+        _invoicePresetPicker.Items.Add("7 ngày gần nhất");
+        _invoicePresetPicker.Items.Add("Tháng trước");
+        _invoicePresetPicker.Items.Add("Tùy chọn");
+        _invoicePresetPicker.SelectedIndexChanged += async (_, _) =>
+        {
+            ApplyInvoicePreset();
+            _invoicePage = 1;
+            await LoadInvoicesAsync(silent: true);
+        };
+        _invoiceFromPicker.DateSelected += (_, _) => MarkCustomInvoiceRange();
+        _invoiceToPicker.DateSelected += (_, _) => MarkCustomInvoiceRange();
+        _invoicePresetPicker.SelectedIndex = 0;
 
         _homeView    = BuildHomeView();
         _tablesView  = BuildTablesView();
@@ -327,7 +394,45 @@ public sealed class DashboardPage : ContentPage
     // ── invoices tab ──────────────────────────────────────────────────────
     private View BuildInvoicesView()
     {
-        // V1: hóa đơn tự tải 7 ngày gần nhất theo hợp đồng hiện tại.
+        var filterGrid = new Grid
+        {
+            ColumnSpacing = AppUi.S(8),
+            RowSpacing = AppUi.S(10),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto)
+            }
+        };
+
+        var presetShell = InputShell(_invoicePresetPicker);
+        filterGrid.Add(presetShell, 0, 0);
+        Grid.SetColumnSpan(presetShell, 2);
+        filterGrid.Add(InputShell(_invoiceFromPicker), 0, 1);
+        filterGrid.Add(InputShell(_invoiceToPicker), 1, 1);
+        filterGrid.Add(_invoiceFilterButton, 0, 2);
+        Grid.SetColumnSpan(_invoiceFilterButton, 2);
+
+        var pagingGrid = new Grid
+        {
+            ColumnSpacing = AppUi.S(8),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            },
+            Children = { _invoicePrevButton, _invoicePageInfo, _invoiceNextButton }
+        };
+        Grid.SetColumn(_invoicePageInfo, 1);
+        Grid.SetColumn(_invoiceNextButton, 2);
+
         return new MauiScrollView
         {
             Content = new VerticalStackLayout
@@ -335,7 +440,12 @@ public sealed class DashboardPage : ContentPage
                 BackgroundColor = AppColors.Surface,
                 Padding = new Thickness(AppUi.S(12)),
                 Spacing = AppUi.S(12),
-                Children = { Section("Danh sách hóa đơn", _invoicePanel) }
+                Children =
+                {
+                    Section("Bộ lọc hóa đơn", filterGrid),
+                    Section("Danh sách hóa đơn", _invoicePanel),
+                    Card(pagingGrid, AppUi.S(10))
+                }
             }
         };
     }
@@ -474,6 +584,46 @@ public sealed class DashboardPage : ContentPage
         _rangePresetPicker.SelectedIndex = 4;
     }
 
+    private void ApplyInvoicePreset()
+    {
+        var today = DateTime.Today;
+        _updatingInvoicePreset = true;
+        switch (_invoicePresetPicker.SelectedIndex)
+        {
+            case 0:
+                _invoiceFromPicker.Date = today;
+                _invoiceToPicker.Date = today;
+                break;
+            case 1:
+                _invoiceFromPicker.Date = today.AddDays(-1);
+                _invoiceToPicker.Date = today.AddDays(-1);
+                break;
+            case 3:
+                var firstThisMonth = new DateTime(today.Year, today.Month, 1);
+                _invoiceFromPicker.Date = firstThisMonth.AddMonths(-1);
+                _invoiceToPicker.Date = firstThisMonth.AddDays(-1);
+                break;
+            case 2:
+                _invoiceFromPicker.Date = today.AddDays(-6);
+                _invoiceToPicker.Date = today;
+                break;
+            default:
+                break;
+        }
+        _updatingInvoicePreset = false;
+    }
+
+    private void MarkCustomInvoiceRange()
+    {
+        if (_updatingInvoicePreset)
+        {
+            return;
+        }
+
+        _invoicePage = 1;
+        _invoicePresetPicker.SelectedIndex = 4;
+    }
+
     // ── summary cards ─────────────────────────────────────────────────────
     private View SummaryGrid()
     {
@@ -564,7 +714,9 @@ public sealed class DashboardPage : ContentPage
             if (_stores.Count == 0)
                 throw new InvalidOperationException("Tenant chưa có cửa hàng Revenue Cloud đang bật.");
 
-            _session.StoreId = _stores[0].StoreId;
+            var selectedStore = _stores[0];
+            _session.StoreId = selectedStore.StoreId;
+            _storeTimezone = selectedStore.Timezone;
             await LoadReportsAsync();
             UpdateOfflineBanner();
         }
@@ -591,6 +743,7 @@ public sealed class DashboardPage : ContentPage
             var requestedDate = PickerDate(_datePicker);
             var today = await _api.TodayAsync(requestedDate, _session.StoreId);
             var month = await _api.MonthAsync(requestedDate, _session.StoreId);
+            _storeTimezone = string.IsNullOrWhiteSpace(today.Timezone) ? _storeTimezone : today.Timezone;
             var latestDataDate = ResolveLatestDataDate(requestedDate, today, month);
             OpenTablesReport? openTables = null;
             string openTablesError = string.Empty;
@@ -608,7 +761,7 @@ public sealed class DashboardPage : ContentPage
                 : $" • Dữ liệu gần nhất: {latestDataDate:dd/MM/yyyy}";
             _syncStatus.Text = today.LastSyncAt is null
                 ? "Chưa có lần đồng bộ cloud" + dateNote
-                : $"Đồng bộ: {today.LastSyncAt:dd/MM/yyyy HH:mm}{dateNote}";
+                : $"Đồng bộ: {RevenueTime.FormatStore(today.LastSyncAt, _storeTimezone, "dd/MM/yyyy HH:mm")}{dateNote}";
             _revenue.Text = RevenueApiClient.Money(today.Summary.Revenue);
             _invoiceCount.Text = today.Summary.InvoiceCount.ToString("N0");
             _avg.Text = RevenueApiClient.Money(today.Summary.AverageInvoiceValue);
@@ -617,6 +770,7 @@ public sealed class DashboardPage : ContentPage
             RenderPayment(today.PaymentBreakdown);
             RenderTables(openTables, openTablesError);
             await LoadRangeAsync(silent: true);
+            await LoadInvoicesAsync(silent: true);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -661,13 +815,11 @@ public sealed class DashboardPage : ContentPage
             _rangeButton.IsEnabled = false;
             var range = await _api.RangeAsync(from, to, _session.StoreId);
             var top = await _api.TopProductsAsync(from, to, _session.StoreId);
-            var invoices = await _api.InvoicesAsync(from, to, _session.StoreId);
             _rangeRevenue.Text = RevenueApiClient.Money(range.Summary.Revenue);
             _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hủy";
             _rangePayments.Text =
                 $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}\nThẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
             RenderTop(top.Items);
-            RenderInvoices(invoices.Items);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -679,6 +831,46 @@ public sealed class DashboardPage : ContentPage
         finally
         {
             _rangeButton.IsEnabled = true;
+        }
+    }
+
+    private async Task LoadInvoicesAsync(bool silent = false)
+    {
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
+        var from = PickerDate(_invoiceFromPicker);
+        var to = PickerDate(_invoiceToPicker);
+        if (from.Date > to.Date)
+        {
+            if (!silent)
+                await DisplayAlert("Khoảng ngày không hợp lệ", "Từ ngày phải nhỏ hơn hoặc bằng đến ngày.", "OK");
+            return;
+        }
+
+        try
+        {
+            _invoiceFilterButton.IsEnabled = false;
+            _invoicePrevButton.IsEnabled = false;
+            _invoiceNextButton.IsEnabled = false;
+            var invoices = await _api.InvoicesAsync(from, to, _session.StoreId, _invoicePage, InvoicePageSize);
+            if (_invoicePage > 1 && invoices.Items.Count == 0 && invoices.TotalItems > 0)
+            {
+                _invoicePage = Math.Max(1, (int)Math.Ceiling(invoices.TotalItems / (double)InvoicePageSize));
+                invoices = await _api.InvoicesAsync(from, to, _session.StoreId, _invoicePage, InvoicePageSize);
+            }
+
+            RenderInvoices(invoices.Items);
+            UpdateInvoicePaging(invoices);
+            UpdateOfflineBanner();
+        }
+        catch (Exception ex)
+        {
+            UpdateOfflineBanner();
+            if (!silent)
+                await DisplayAlert("Không tải được hóa đơn", ex.Message, "OK");
+        }
+        finally
+        {
+            _invoiceFilterButton.IsEnabled = true;
         }
     }
 
@@ -737,7 +929,7 @@ public sealed class DashboardPage : ContentPage
             var zone = table.ZoneName;
             var opened = table.OccupiedAt is null
                 ? "Chưa rõ giờ mở"
-                : $"Mở {table.OccupiedAt.Value.ToLocalTime():HH:mm dd/MM}";
+                : $"Mở {RevenueTime.FormatStore(table.OccupiedAt, _storeTimezone, "HH:mm dd/MM")}";
             var subtitle = string.IsNullOrWhiteSpace(zone)
                 ? opened
                 : $"{zone} • {opened}";
@@ -748,7 +940,7 @@ public sealed class DashboardPage : ContentPage
                 showChevron: true);
             var selectedTable = table;
             var tap = new TapGestureRecognizer();
-            tap.Tapped += async (_, _) => await Navigation.PushAsync(new OpenTableDetailPage(selectedTable));
+            tap.Tapped += async (_, _) => await Navigation.PushAsync(new OpenTableDetailPage(selectedTable, _storeTimezone));
             row.GestureRecognizers.Add(tap);
             _tablesPanel.Add(row);
         }
@@ -762,7 +954,7 @@ public sealed class DashboardPage : ContentPage
     private void RenderInvoices(IReadOnlyList<InvoiceListItem> items)
     {
         _invoicePanel.Clear();
-        foreach (var item in items.Take(30))
+        foreach (var item in items.Take(InvoicePageSize))
         {
             var row = ListRow(
                 $"{item.TableName} — {RevenueApiClient.Money(item.Total)}",
@@ -777,12 +969,25 @@ public sealed class DashboardPage : ContentPage
             _invoicePanel.Add(EmptyLabel("Chưa có hóa đơn."));
     }
 
+    private void UpdateInvoicePaging(InvoiceListResponse invoices)
+    {
+        var totalPages = Math.Max(1, (int)Math.Ceiling(invoices.TotalItems / (double)InvoicePageSize));
+        _invoicePage = Math.Clamp(_invoicePage, 1, totalPages);
+        var from = PickerDate(_invoiceFromPicker);
+        var to = PickerDate(_invoiceToPicker);
+        _invoicePageInfo.Text = invoices.TotalItems == 0
+            ? $"Không có hóa đơn • {from:dd/MM/yyyy} - {to:dd/MM/yyyy}"
+            : $"Trang {_invoicePage}/{totalPages} • {invoices.TotalItems:N0} hóa đơn • {from:dd/MM/yyyy} - {to:dd/MM/yyyy}";
+        _invoicePrevButton.IsEnabled = _invoicePage > 1;
+        _invoiceNextButton.IsEnabled = _invoicePage < totalPages;
+    }
+
     private async Task ShowInvoiceDetailAsync(string invoiceId)
     {
         try
         {
             var invoice = await _api.InvoiceDetailAsync(invoiceId, _session.StoreId);
-            await Navigation.PushAsync(new InvoiceDetailPage(invoice));
+            await Navigation.PushAsync(new InvoiceDetailPage(invoice, _storeTimezone));
         }
         catch (Exception ex)
         {

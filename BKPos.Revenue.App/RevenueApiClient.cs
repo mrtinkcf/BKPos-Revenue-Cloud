@@ -100,8 +100,15 @@ public sealed class RevenueApiClient
     public Task<TopProductsResponse> TopProductsAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<TopProductsResponse>($"/reports/top-products?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&limit=5", $"top_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
-    public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<InvoiceListResponse>($"/invoices?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&page=1&pageSize=30", $"invoices_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
+    public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
+    {
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        return GetCachedAsync<InvoiceListResponse>(
+            $"/invoices?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&page={safePage}&pageSize={safePageSize}",
+            $"invoices_{from:yyyyMMdd}_{to:yyyyMMdd}_{safePage}_{safePageSize}",
+            cancellationToken);
+    }
 
     public Task<OpenTablesReport> OpenTablesAsync(string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<OpenTablesReport>($"/reports/open-tables?storeId={Uri.EscapeDataString(storeId)}", "open_tables", cancellationToken);

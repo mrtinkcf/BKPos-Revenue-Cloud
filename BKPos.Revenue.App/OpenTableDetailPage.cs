@@ -8,10 +8,12 @@ namespace BKPos.Revenue.App;
 public sealed class OpenTableDetailPage : ContentPage
 {
     private readonly OpenTableDto _table;
+    private readonly string _timezone;
 
-    public OpenTableDetailPage(OpenTableDto table)
+    public OpenTableDetailPage(OpenTableDto table, string? timezone = null)
     {
         _table = table;
+        _timezone = string.IsNullOrWhiteSpace(timezone) ? "Asia/Ho_Chi_Minh" : timezone;
         BackgroundColor = AppColors.Surface;
         HideSoftInputOnTapped = true;
         MauiNavigationPage.SetHasNavigationBar(this, false);
@@ -118,7 +120,7 @@ public sealed class OpenTableDetailPage : ContentPage
         grid.Add(InfoBlock("Bàn", Safe(_table.TableName)), 0, 0);
         grid.Add(InfoBlock("Tổng tạm tính", RevenueApiClient.Money(_table.Total), AppColors.Blue), 1, 0);
         grid.Add(InfoBlock("Khu vực", string.IsNullOrWhiteSpace(_table.ZoneName) ? "-" : _table.ZoneName), 0, 1);
-        grid.Add(InfoBlock("Giờ mở", FormatDateTime(_table.OccupiedAt)), 1, 1);
+        grid.Add(InfoBlock("Giờ mở", FormatDateTime(_table.OccupiedAt, _timezone)), 1, 1);
 
         return Card(grid);
     }
@@ -288,8 +290,8 @@ public sealed class OpenTableDetailPage : ContentPage
             ? value.ToString("N0", CultureInfo.GetCultureInfo("vi-VN"))
             : value.ToString("N2", CultureInfo.GetCultureInfo("vi-VN"));
 
-    private static string FormatDateTime(DateTimeOffset? value)
-        => value is null ? "-" : value.Value.ToLocalTime().ToString("HH:mm dd/MM/yyyy", CultureInfo.GetCultureInfo("vi-VN"));
+    private static string FormatDateTime(DateTimeOffset? value, string timezone)
+        => RevenueTime.FormatStore(value, timezone, "HH:mm dd/MM/yyyy");
 
     private static string Safe(string? value)
         => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();

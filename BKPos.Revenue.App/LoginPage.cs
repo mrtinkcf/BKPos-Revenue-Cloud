@@ -82,9 +82,8 @@ public sealed class LoginPage : ContentPage
             VerticalOptions = LayoutOptions.Center,
             Children =
             {
-                new Label { Text = "BKPos", TextColor = Colors.White, FontSize = AppUi.S(AppUi.IsSmallScreen ? 28 : 34), FontAttributes = FontAttributes.Bold },
-                new Label { Text = "Revenue Cloud", TextColor = Color.FromArgb("#93C5FD"), FontSize = AppUi.S(AppUi.IsSmallScreen ? 15 : 17), FontAttributes = FontAttributes.Bold },
-                new Label { Text = "Theo dõi doanh thu mọi lúc, mọi nơi", TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(13) }
+                new Label { Text = "BKPos Mobile", TextColor = Colors.White, FontSize = AppUi.S(AppUi.IsSmallScreen ? 28 : 34), FontAttributes = FontAttributes.Bold },
+                new Label { Text = "Quản lý doanh thu và hoạt động của cửa hàng", TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(13) }
             }
         };
 
