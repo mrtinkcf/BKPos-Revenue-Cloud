@@ -133,8 +133,8 @@ public sealed class DashboardPage : ContentPage
         _api = api;
         _session = session;
         _services = services;
-        _lineChart = new GraphicsView { Drawable = _lineDrawable, HeightRequest = AppUi.ChartHeight };
-        _pieChart = new GraphicsView { Drawable = _pieDrawable, HeightRequest = AppUi.ChartHeight };
+        _lineChart = CreateChartView(_lineDrawable);
+        _pieChart = CreateChartView(_pieDrawable);
         BackgroundColor = Colors.White;
         MauiNavigationPage.SetHasNavigationBar(this, false);
         HideSoftInputOnTapped = true;
@@ -150,6 +150,7 @@ public sealed class DashboardPage : ContentPage
         base.OnAppearing();
         _autoRefreshTimer?.Start();
         await LoadAsync();
+        InvalidateChartsSoon();
     }
 
     protected override void OnDisappearing()
@@ -543,6 +544,11 @@ public sealed class DashboardPage : ContentPage
             _tabIconLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
             _tabTextLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
         }
+
+        if (tab == Tab.Home)
+        {
+            InvalidateChartsSoon();
+        }
     }
 
     private void ApplyRangePreset()
@@ -698,6 +704,35 @@ public sealed class DashboardPage : ContentPage
             Content = content
         };
 
+    private GraphicsView CreateChartView(IDrawable drawable)
+    {
+        var chart = new GraphicsView
+        {
+            Drawable = drawable,
+            HeightRequest = AppUi.ChartHeight,
+            MinimumHeightRequest = AppUi.ChartHeight,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Start
+        };
+        chart.SizeChanged += (_, _) =>
+        {
+            if (chart.Width > 0 && chart.Height > 0)
+            {
+                chart.Invalidate();
+            }
+        };
+        return chart;
+    }
+
+    private void InvalidateChartsSoon()
+    {
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(80), () =>
+        {
+            _lineChart.Invalidate();
+            _pieChart.Invalidate();
+        });
+    }
+
     // ── data loading (unchanged logic) ───────────────────────────────────
     private async Task LoadAsync(bool fromPull = false)
     {
@@ -768,6 +803,7 @@ public sealed class DashboardPage : ContentPage
             _cancelled.Text = today.Summary.CancelledInvoiceCount.ToString("N0");
             RenderDaily(today.Revenue7Days.Count > 0 ? today.Revenue7Days : month.Daily, month.Daily);
             RenderPayment(today.PaymentBreakdown);
+            InvalidateChartsSoon();
             RenderTables(openTables, openTablesError);
             await LoadRangeAsync(silent: true);
             await LoadInvoicesAsync(silent: true);
