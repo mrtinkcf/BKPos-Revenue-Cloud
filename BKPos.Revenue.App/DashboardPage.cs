@@ -17,7 +17,6 @@ public sealed class DashboardPage : ContentPage
     private readonly IServiceProvider _services;
 
     // ── data controls (kept for existing Render* / Load* methods) ────────
-    private readonly MauiDatePicker _datePicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiPicker _rangePresetPicker = new() { Title = "Chọn khoảng báo cáo", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
@@ -26,6 +25,7 @@ public sealed class DashboardPage : ContentPage
     private readonly MauiPicker _invoicePresetPicker = new() { Title = "Lọc hóa đơn", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
     private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
+    private readonly Label _todayBadge = new() { TextColor = AppColors.Blue, FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold };
     private readonly Label _revenue = ValueLabel(AppUi.S(28), AppColors.Blue);
     private readonly Label _invoiceCount = ValueLabel(AppUi.S(22), AppColors.Navy);
     private readonly Label _avg = ValueLabel(AppUi.S(22), AppColors.Navy);
@@ -139,6 +139,7 @@ public sealed class DashboardPage : ContentPage
         MauiNavigationPage.SetHasNavigationBar(this, false);
         HideSoftInputOnTapped = true;
         On<iOS>().SetUseSafeArea(true);
+        _todayBadge.Text = $"DOANH THU HÔM NAY • {StoreToday():dd/MM/yyyy}";
         _autoRefreshTimer = Dispatcher.CreateTimer();
         _autoRefreshTimer.Interval = TimeSpan.FromSeconds(60);
         _autoRefreshTimer.Tick += async (_, _) => await LoadReportsAsync(silent: true);
@@ -182,10 +183,6 @@ public sealed class DashboardPage : ContentPage
             await LoadInvoicesAsync();
         };
         _refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
-        _datePicker.DateSelected += async (_, _) =>
-        {
-            await LoadReportsAsync();
-        };
         _rangePresetPicker.Items.Add("Hôm nay");
         _rangePresetPicker.Items.Add("Hôm qua");
         _rangePresetPicker.Items.Add("7 ngày gần nhất");
@@ -274,15 +271,6 @@ public sealed class DashboardPage : ContentPage
     // ── home tab ──────────────────────────────────────────────────────────
     private View BuildHomeView()
     {
-        var dateShell = new Border
-        {
-            Stroke = Color.FromArgb("#D8E1EC"),
-            StrokeShape = new RoundRectangle { CornerRadius = 10 },
-            BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(AppUi.S(10), 0),
-            Content = _datePicker
-        };
-
         var rangeGrid = new Grid
         {
             ColumnSpacing = AppUi.S(8),
@@ -328,7 +316,7 @@ public sealed class DashboardPage : ContentPage
                 Spacing = AppUi.S(12),
                 Children =
                 {
-                    dateShell,
+                    TodaySummaryBadge(),
                     SummaryGrid(),
                     Section("Báo cáo khoảng ngày", rangeGrid),
                     Section("Doanh thu 7 ngày",
@@ -704,6 +692,17 @@ public sealed class DashboardPage : ContentPage
             Content = content
         };
 
+    private Border TodaySummaryBadge()
+        => new()
+        {
+            Stroke = Color.FromArgb("#BFDBFE"),
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(999) },
+            BackgroundColor = Color.FromArgb("#EFF6FF"),
+            Padding = new Thickness(AppUi.S(12), AppUi.S(7)),
+            HorizontalOptions = LayoutOptions.Start,
+            Content = _todayBadge
+        };
+
     private GraphicsView CreateChartView(IDrawable drawable)
     {
         var chart = new GraphicsView
@@ -732,6 +731,9 @@ public sealed class DashboardPage : ContentPage
             _pieChart.Invalidate();
         });
     }
+
+    private DateTime StoreToday()
+        => RevenueTime.ToStoreTime(DateTimeOffset.Now, _storeTimezone).Date;
 
     // ── data loading (unchanged logic) ───────────────────────────────────
     private async Task LoadAsync(bool fromPull = false)
@@ -775,10 +777,12 @@ public sealed class DashboardPage : ContentPage
         if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
         try
         {
-            var requestedDate = PickerDate(_datePicker);
+            var requestedDate = StoreToday();
             var today = await _api.TodayAsync(requestedDate, _session.StoreId);
             var month = await _api.MonthAsync(requestedDate, _session.StoreId);
             _storeTimezone = string.IsNullOrWhiteSpace(today.Timezone) ? _storeTimezone : today.Timezone;
+            requestedDate = StoreToday();
+            _todayBadge.Text = $"DOANH THU HÔM NAY • {requestedDate:dd/MM/yyyy}";
             var latestDataDate = ResolveLatestDataDate(requestedDate, today, month);
             OpenTablesReport? openTables = null;
             string openTablesError = string.Empty;
