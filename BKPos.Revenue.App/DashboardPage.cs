@@ -80,7 +80,7 @@ public sealed class DashboardPage : ContentPage
         HeightRequest = AppUi.S(40),
         FontSize = AppUi.S(12)
     };
-    private readonly RefreshView _refreshView = new();
+    private readonly List<RefreshView> _refreshViews = [];
     private readonly IDispatcherTimer? _autoRefreshTimer;
     private const int InvoicePageSize = 20;
     private bool _loading;
@@ -89,6 +89,7 @@ public sealed class DashboardPage : ContentPage
     private int _invoicePage = 1;
     private List<StoreDto> _stores = [];
     private string _storeTimezone = "Asia/Ho_Chi_Minh";
+    private OpenTablesReport? _lastOpenTablesReport;
 
     // ── header action buttons ─────────────────────────────────────────────
     private readonly Button _refreshButton = new()
@@ -115,6 +116,9 @@ public sealed class DashboardPage : ContentPage
     // ── tab navigation ────────────────────────────────────────────────────
     private enum Tab { Home, Tables, Invoices, TopProducts }
     private Tab _activeTab = Tab.Home;
+    private readonly bool[] _loadedTabs = new bool[4];
+    private DateTimeOffset _lastSwipeAt = DateTimeOffset.MinValue;
+    private bool _panTabSwitchHandled;
     private readonly Label _headerTitle = new() { TextColor = Colors.White, FontSize = AppUi.S(18), FontAttributes = FontAttributes.Bold };
     private readonly Label[] _tabIconLabels = new Label[4];
     private readonly Label[] _tabTextLabels = new Label[4];
@@ -142,7 +146,7 @@ public sealed class DashboardPage : ContentPage
         _todayBadge.Text = $"DOANH THU HÔM NAY • {StoreToday():dd/MM/yyyy}";
         _autoRefreshTimer = Dispatcher.CreateTimer();
         _autoRefreshTimer.Interval = TimeSpan.FromSeconds(60);
-        _autoRefreshTimer.Tick += async (_, _) => await LoadReportsAsync(silent: true);
+        _autoRefreshTimer.Tick += async (_, _) => await LoadActiveTabAsync(silent: true, force: true);
         Build();
     }
 
@@ -182,7 +186,6 @@ public sealed class DashboardPage : ContentPage
             _invoicePage++;
             await LoadInvoicesAsync();
         };
-        _refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
         _rangePresetPicker.Items.Add("Hôm nay");
         _rangePresetPicker.Items.Add("Hôm qua");
         _rangePresetPicker.Items.Add("7 ngày gần nhất");
@@ -222,6 +225,7 @@ public sealed class DashboardPage : ContentPage
         contentGrid.Children.Add(_tablesView);
         contentGrid.Children.Add(_invoicesView);
         contentGrid.Children.Add(_topView);
+        AddNavigationGestures(contentGrid);
         Grid.SetRow(contentGrid, 1);
 
         var tabBar = BuildTabBar();
@@ -307,7 +311,7 @@ public sealed class DashboardPage : ContentPage
         rangeGrid.Add(rangeSummary, 0, 3);
         Grid.SetColumnSpan(rangeSummary, 2);
 
-        _refreshView.Content = new MauiScrollView
+        return Refreshable(new MauiScrollView
         {
             Content = new VerticalStackLayout
             {
@@ -325,8 +329,7 @@ public sealed class DashboardPage : ContentPage
                         new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _pieChart, _paymentPanel } })
                 }
             }
-        };
-        return _refreshView;
+        });
     }
 
     // ── tables tab ────────────────────────────────────────────────────────
@@ -364,7 +367,7 @@ public sealed class DashboardPage : ContentPage
             Children = { leftCol, rightCol }
         };
 
-        return new MauiScrollView
+        return Refreshable(new MauiScrollView
         {
             Content = new VerticalStackLayout
             {
@@ -377,7 +380,7 @@ public sealed class DashboardPage : ContentPage
                     Section("Danh sách bàn", _tablesPanel)
                 }
             }
-        };
+        });
     }
 
     // ── invoices tab ──────────────────────────────────────────────────────
@@ -422,7 +425,7 @@ public sealed class DashboardPage : ContentPage
         Grid.SetColumn(_invoicePageInfo, 1);
         Grid.SetColumn(_invoiceNextButton, 2);
 
-        return new MauiScrollView
+        return Refreshable(new MauiScrollView
         {
             Content = new VerticalStackLayout
             {
@@ -436,14 +439,14 @@ public sealed class DashboardPage : ContentPage
                     Card(pagingGrid, AppUi.S(10))
                 }
             }
-        };
+        });
     }
 
     // ── top-products tab ──────────────────────────────────────────────────
     private View BuildTopProductsView()
     {
         // V1: bán chạy tự tải 7 ngày gần nhất theo hợp đồng hiện tại.
-        return new MauiScrollView
+        return Refreshable(new MauiScrollView
         {
             Content = new VerticalStackLayout
             {
@@ -452,7 +455,7 @@ public sealed class DashboardPage : ContentPage
                 Spacing = AppUi.S(12),
                 Children = { Section("Top món bán chạy", _topPanel) }
             }
-        };
+        });
     }
 
     // ── tab bar ───────────────────────────────────────────────────────────
@@ -516,7 +519,101 @@ public sealed class DashboardPage : ContentPage
         return grid;
     }
 
-    private void SwitchTab(Tab tab)
+    private RefreshView Refreshable(View content)
+    {
+        content.HorizontalOptions = LayoutOptions.Fill;
+        content.VerticalOptions = LayoutOptions.Fill;
+        AddNavigationGestures(content);
+        if (content is MauiScrollView scrollView)
+        {
+            scrollView.HorizontalOptions = LayoutOptions.Fill;
+            scrollView.VerticalOptions = LayoutOptions.Fill;
+            if (scrollView.Content is View scrollContent)
+            {
+                scrollContent.MinimumHeightRequest = Math.Max(AppUi.ScreenHeight - AppUi.S(170), AppUi.S(420));
+                AddNavigationGestures(scrollContent);
+            }
+        }
+
+        var refreshView = new RefreshView
+        {
+            Content = content,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill,
+            RefreshColor = AppColors.Blue
+        };
+        refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
+        AddNavigationGestures(refreshView);
+        _refreshViews.Add(refreshView);
+        return refreshView;
+    }
+
+    private void AddNavigationGestures(View view)
+    {
+        AddSwipeGestures(view);
+
+        var pan = new PanGestureRecognizer();
+        pan.PanUpdated += (_, args) => HandleHorizontalTabPan(args);
+        view.GestureRecognizers.Add(pan);
+    }
+
+    private void AddSwipeGestures(View view)
+    {
+        var left = new SwipeGestureRecognizer { Direction = SwipeDirection.Left };
+        left.Swiped += (_, _) => SwitchRelativeTab(1);
+        var right = new SwipeGestureRecognizer { Direction = SwipeDirection.Right };
+        right.Swiped += (_, _) => SwitchRelativeTab(-1);
+        view.GestureRecognizers.Add(left);
+        view.GestureRecognizers.Add(right);
+    }
+
+    private void HandleHorizontalTabPan(PanUpdatedEventArgs args)
+    {
+        if (args.StatusType == GestureStatus.Started)
+        {
+            _panTabSwitchHandled = false;
+            return;
+        }
+
+        if (args.StatusType is GestureStatus.Completed or GestureStatus.Canceled)
+        {
+            _panTabSwitchHandled = false;
+            return;
+        }
+
+        if (_panTabSwitchHandled || args.StatusType != GestureStatus.Running)
+        {
+            return;
+        }
+
+        var horizontal = Math.Abs(args.TotalX);
+        var vertical = Math.Abs(args.TotalY);
+        if (horizontal < AppUi.S(70) || horizontal < vertical * 1.45)
+        {
+            return;
+        }
+
+        _panTabSwitchHandled = true;
+        SwitchRelativeTab(args.TotalX < 0 ? 1 : -1);
+    }
+
+    private void SwitchRelativeTab(int delta)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastSwipeAt < TimeSpan.FromMilliseconds(350))
+        {
+            return;
+        }
+
+        _lastSwipeAt = now;
+        var next = Math.Clamp((int)_activeTab + delta, 0, TabTitles.Length - 1);
+        if (next != (int)_activeTab)
+        {
+            SwitchTab((Tab)next);
+        }
+    }
+
+    private async void SwitchTab(Tab tab)
     {
         _activeTab = tab;
         _headerTitle.Text = TabTitles[(int)tab];
@@ -536,6 +633,11 @@ public sealed class DashboardPage : ContentPage
         if (tab == Tab.Home)
         {
             InvalidateChartsSoon();
+        }
+
+        if (!_loading && _stores.Count > 0 && !_loadedTabs[(int)tab])
+        {
+            await LoadActiveTabAsync(silent: true, force: false);
         }
     }
 
@@ -735,6 +837,20 @@ public sealed class DashboardPage : ContentPage
     private DateTime StoreToday()
         => RevenueTime.ToStoreTime(DateTimeOffset.Now, _storeTimezone).Date;
 
+    private static string FriendlyDataError(Exception ex)
+    {
+        if (ex is HttpRequestException || ex is TaskCanceledException || ex is TimeoutException ||
+            ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Kết nối cloud tạm thời chậm. Vui lòng kéo xuống để tải lại.";
+        }
+
+        return string.IsNullOrWhiteSpace(ex.Message)
+            ? "Không đọc được dữ liệu. Vui lòng thử lại."
+            : ex.Message;
+    }
+
     // ── data loading (unchanged logic) ───────────────────────────────────
     private async Task LoadAsync(bool fromPull = false)
     {
@@ -746,15 +862,8 @@ public sealed class DashboardPage : ContentPage
             _api.ResetCacheStatus();
             UpdateOfflineBanner();
 
-            var stores = await _api.StoresAsync();
-            _stores = stores.Stores.Where(s => s.Enabled).ToList();
-            if (_stores.Count == 0)
-                throw new InvalidOperationException("Tenant chưa có cửa hàng Revenue Cloud đang bật.");
-
-            var selectedStore = _stores[0];
-            _session.StoreId = selectedStore.StoreId;
-            _storeTimezone = selectedStore.Timezone;
-            await LoadReportsAsync();
+            await EnsureStoreAsync();
+            await LoadActiveTabAsync(silent: fromPull, force: true);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -766,51 +875,89 @@ public sealed class DashboardPage : ContentPage
         finally
         {
             _refreshButton.IsEnabled = true;
-            _refreshView.IsRefreshing = false;
+            ClearRefreshIndicators();
             _loading = false;
+        }
+    }
+
+    private async Task EnsureStoreAsync()
+    {
+        if (_stores.Count > 0 && !string.IsNullOrWhiteSpace(_session.StoreId))
+        {
+            return;
+        }
+
+        var stores = await _api.StoresAsync();
+        _stores = stores.Stores.Where(s => s.Enabled).ToList();
+        if (_stores.Count == 0)
+            throw new InvalidOperationException("Tenant chưa có cửa hàng Revenue Cloud đang bật.");
+
+        var selectedStore = _stores.FirstOrDefault(s => s.StoreId == _session.StoreId) ?? _stores[0];
+        _session.StoreId = selectedStore.StoreId;
+        _storeTimezone = selectedStore.Timezone;
+    }
+
+    private async Task LoadActiveTabAsync(bool silent = false, bool force = false)
+    {
+        if (string.IsNullOrWhiteSpace(_session.StoreId))
+        {
+            return;
+        }
+
+        var tab = _activeTab;
+        if (!force && _loadedTabs[(int)tab])
+        {
+            return;
+        }
+
+        switch (tab)
+        {
+            case Tab.Home:
+                await LoadReportsAsync(silent);
+                break;
+            case Tab.Tables:
+                await LoadOpenTablesAsync(silent);
+                break;
+            case Tab.Invoices:
+                await LoadInvoicesAsync(silent);
+                break;
+            case Tab.TopProducts:
+                await LoadTopProductsAsync(silent);
+                break;
+        }
+
+        _loadedTabs[(int)tab] = true;
+    }
+
+    private void ClearRefreshIndicators()
+    {
+        foreach (var refreshView in _refreshViews)
+        {
+            refreshView.IsRefreshing = false;
         }
     }
 
     private async Task LoadReportsAsync(bool silent = false)
     {
-        if (_loading && silent) return;
         if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
         try
         {
             var requestedDate = StoreToday();
             var today = await _api.TodayAsync(requestedDate, _session.StoreId);
-            var month = await _api.MonthAsync(requestedDate, _session.StoreId);
             _storeTimezone = string.IsNullOrWhiteSpace(today.Timezone) ? _storeTimezone : today.Timezone;
             requestedDate = StoreToday();
             _todayBadge.Text = $"DOANH THU HÔM NAY • {requestedDate:dd/MM/yyyy}";
-            var latestDataDate = ResolveLatestDataDate(requestedDate, today, month);
-            OpenTablesReport? openTables = null;
-            string openTablesError = string.Empty;
-            try
-            {
-                openTables = await _api.OpenTablesAsync(_session.StoreId);
-            }
-            catch (Exception tableEx)
-            {
-                openTablesError = tableEx.Message;
-            }
-
-            var dateNote = latestDataDate.Date == requestedDate.Date
-                ? string.Empty
-                : $" • Dữ liệu gần nhất: {latestDataDate:dd/MM/yyyy}";
             _syncStatus.Text = today.LastSyncAt is null
-                ? "Chưa có lần đồng bộ cloud" + dateNote
-                : $"Đồng bộ: {RevenueTime.FormatStore(today.LastSyncAt, _storeTimezone, "dd/MM/yyyy HH:mm")}{dateNote}";
+                ? "Chưa có lần đồng bộ cloud"
+                : $"Đồng bộ: {RevenueTime.FormatStore(today.LastSyncAt, _storeTimezone, "dd/MM/yyyy HH:mm")}";
             _revenue.Text = RevenueApiClient.Money(today.Summary.Revenue);
             _invoiceCount.Text = today.Summary.InvoiceCount.ToString("N0");
             _avg.Text = RevenueApiClient.Money(today.Summary.AverageInvoiceValue);
             _cancelled.Text = today.Summary.CancelledInvoiceCount.ToString("N0");
-            RenderDaily(today.Revenue7Days.Count > 0 ? today.Revenue7Days : month.Daily, month.Daily);
+            RenderDaily(today.Revenue7Days, today.Revenue7Days);
             RenderPayment(today.PaymentBreakdown);
             InvalidateChartsSoon();
-            RenderTables(openTables, openTablesError);
             await LoadRangeAsync(silent: true);
-            await LoadInvoicesAsync(silent: true);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -854,12 +1001,10 @@ public sealed class DashboardPage : ContentPage
         {
             _rangeButton.IsEnabled = false;
             var range = await _api.RangeAsync(from, to, _session.StoreId);
-            var top = await _api.TopProductsAsync(from, to, _session.StoreId);
             _rangeRevenue.Text = RevenueApiClient.Money(range.Summary.Revenue);
             _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hủy";
             _rangePayments.Text =
                 $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}\nThẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
-            RenderTop(top.Items);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -871,6 +1016,44 @@ public sealed class DashboardPage : ContentPage
         finally
         {
             _rangeButton.IsEnabled = true;
+        }
+    }
+
+    private async Task LoadOpenTablesAsync(bool silent = false)
+    {
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
+        try
+        {
+            var openTables = await _api.OpenTablesAsync(_session.StoreId);
+            _lastOpenTablesReport = openTables;
+            RenderTables(openTables, string.Empty);
+            UpdateOfflineBanner();
+        }
+        catch (Exception ex)
+        {
+            RenderTables(_lastOpenTablesReport, FriendlyDataError(ex));
+            UpdateOfflineBanner();
+            if (!silent && _lastOpenTablesReport is null)
+                await DisplayAlert("Không tải được bàn đang phục vụ", ex.Message, "OK");
+        }
+    }
+
+    private async Task LoadTopProductsAsync(bool silent = false)
+    {
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
+        var to = StoreToday();
+        var from = to.AddDays(-6);
+        try
+        {
+            var top = await _api.TopProductsAsync(from, to, _session.StoreId);
+            RenderTop(top.Items);
+            UpdateOfflineBanner();
+        }
+        catch (Exception ex)
+        {
+            UpdateOfflineBanner();
+            if (!silent)
+                await DisplayAlert("Không tải được món bán chạy", ex.Message, "OK");
         }
     }
 
@@ -957,7 +1140,7 @@ public sealed class DashboardPage : ContentPage
             _tableEstimatedLabel.Text = RevenueApiClient.Money(0);
             _tablesPanel.Add(EmptyLabel(string.IsNullOrWhiteSpace(error)
                 ? "Chưa có dữ liệu bàn đang phục vụ."
-                : $"Chưa đọc được dữ liệu bàn đang phục vụ: {error}"));
+                : error));
             return;
         }
 
