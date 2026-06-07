@@ -118,7 +118,8 @@ public sealed class DashboardPage : ContentPage
     private Tab _activeTab = Tab.Home;
     private readonly bool[] _loadedTabs = new bool[4];
     private DateTimeOffset _lastSwipeAt = DateTimeOffset.MinValue;
-    private bool _panTabSwitchHandled;
+    private bool _switchingTab;
+    private bool _tabVisibilityInitialized;
     private readonly Label _headerTitle = new() { TextColor = Colors.White, FontSize = AppUi.S(18), FontAttributes = FontAttributes.Bold };
     private readonly Label[] _tabIconLabels = new Label[4];
     private readonly Label[] _tabTextLabels = new Label[4];
@@ -225,7 +226,7 @@ public sealed class DashboardPage : ContentPage
         contentGrid.Children.Add(_tablesView);
         contentGrid.Children.Add(_invoicesView);
         contentGrid.Children.Add(_topView);
-        AddNavigationGestures(contentGrid);
+        AddSwipeGestures(contentGrid);
         Grid.SetRow(contentGrid, 1);
 
         var tabBar = BuildTabBar();
@@ -509,7 +510,11 @@ public sealed class DashboardPage : ContentPage
                 Content = cell
             };
             var tap = new TapGestureRecognizer();
-            tap.Tapped += (_, _) => SwitchTab(tabs[idx]);
+            tap.Tapped += (_, _) =>
+            {
+                var direction = Math.Sign(idx - (int)_activeTab);
+                SwitchTab(tabs[idx], animate: direction != 0, direction: direction);
+            };
             tapHost.GestureRecognizers.Add(tap);
 
             Grid.SetColumn(tapHost, i);
@@ -523,7 +528,7 @@ public sealed class DashboardPage : ContentPage
     {
         content.HorizontalOptions = LayoutOptions.Fill;
         content.VerticalOptions = LayoutOptions.Fill;
-        AddNavigationGestures(content);
+        AddSwipeGestures(content);
         if (content is MauiScrollView scrollView)
         {
             scrollView.HorizontalOptions = LayoutOptions.Fill;
@@ -531,7 +536,7 @@ public sealed class DashboardPage : ContentPage
             if (scrollView.Content is View scrollContent)
             {
                 scrollContent.MinimumHeightRequest = Math.Max(AppUi.ScreenHeight - AppUi.S(170), AppUi.S(420));
-                AddNavigationGestures(scrollContent);
+                AddSwipeGestures(scrollContent);
             }
         }
 
@@ -543,18 +548,9 @@ public sealed class DashboardPage : ContentPage
             RefreshColor = AppColors.Blue
         };
         refreshView.Refreshing += async (_, _) => await LoadAsync(fromPull: true);
-        AddNavigationGestures(refreshView);
+        AddSwipeGestures(refreshView);
         _refreshViews.Add(refreshView);
         return refreshView;
-    }
-
-    private void AddNavigationGestures(View view)
-    {
-        AddSwipeGestures(view);
-
-        var pan = new PanGestureRecognizer();
-        pan.PanUpdated += (_, args) => HandleHorizontalTabPan(args);
-        view.GestureRecognizers.Add(pan);
     }
 
     private void AddSwipeGestures(View view)
@@ -565,36 +561,6 @@ public sealed class DashboardPage : ContentPage
         right.Swiped += (_, _) => SwitchRelativeTab(-1);
         view.GestureRecognizers.Add(left);
         view.GestureRecognizers.Add(right);
-    }
-
-    private void HandleHorizontalTabPan(PanUpdatedEventArgs args)
-    {
-        if (args.StatusType == GestureStatus.Started)
-        {
-            _panTabSwitchHandled = false;
-            return;
-        }
-
-        if (args.StatusType is GestureStatus.Completed or GestureStatus.Canceled)
-        {
-            _panTabSwitchHandled = false;
-            return;
-        }
-
-        if (_panTabSwitchHandled || args.StatusType != GestureStatus.Running)
-        {
-            return;
-        }
-
-        var horizontal = Math.Abs(args.TotalX);
-        var vertical = Math.Abs(args.TotalY);
-        if (horizontal < AppUi.S(70) || horizontal < vertical * 1.45)
-        {
-            return;
-        }
-
-        _panTabSwitchHandled = true;
-        SwitchRelativeTab(args.TotalX < 0 ? 1 : -1);
     }
 
     private void SwitchRelativeTab(int delta)
@@ -609,36 +575,101 @@ public sealed class DashboardPage : ContentPage
         var next = Math.Clamp((int)_activeTab + delta, 0, TabTitles.Length - 1);
         if (next != (int)_activeTab)
         {
-            SwitchTab((Tab)next);
+            SwitchTab((Tab)next, animate: true, direction: delta);
         }
     }
 
-    private async void SwitchTab(Tab tab)
+    private async void SwitchTab(Tab tab, bool animate = false, int direction = 0)
     {
-        _activeTab = tab;
-        _headerTitle.Text = TabTitles[(int)tab];
+        if (_switchingTab || (tab == _activeTab && _tabVisibilityInitialized && !animate))
+        {
+            return;
+        }
 
-        _homeView!.IsVisible    = tab == Tab.Home;
-        _tablesView!.IsVisible  = tab == Tab.Tables;
+        var previousTab = _activeTab;
+        var previousView = GetTabView(previousTab);
+        var nextView = GetTabView(tab);
+
+        _switchingTab = true;
+        try
+        {
+            _activeTab = tab;
+            _headerTitle.Text = TabTitles[(int)tab];
+
+            if (animate && _tabVisibilityInitialized && previousView is not null && nextView is not null && previousView != nextView)
+            {
+                direction = direction == 0 ? Math.Sign((int)tab - (int)previousTab) : Math.Sign(direction);
+                await AnimateTabTransitionAsync(previousView, nextView, direction == 0 ? 1 : direction);
+            }
+            else
+            {
+                SetVisibleTab(tab);
+            }
+
+            _tabVisibilityInitialized = true;
+
+            for (var i = 0; i < 4; i++)
+            {
+                var active = i == (int)tab;
+                _tabIconLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
+                _tabTextLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
+            }
+
+            if (tab == Tab.Home)
+            {
+                InvalidateChartsSoon();
+            }
+
+            if (!_loading && _stores.Count > 0 && !_loadedTabs[(int)tab])
+            {
+                await LoadActiveTabAsync(silent: true, force: false);
+            }
+        }
+        finally
+        {
+            _switchingTab = false;
+        }
+    }
+
+    private View? GetTabView(Tab tab) => tab switch
+    {
+        Tab.Home => _homeView,
+        Tab.Tables => _tablesView,
+        Tab.Invoices => _invoicesView,
+        Tab.TopProducts => _topView,
+        _ => null
+    };
+
+    private void SetVisibleTab(Tab tab)
+    {
+        _homeView!.IsVisible = tab == Tab.Home;
+        _tablesView!.IsVisible = tab == Tab.Tables;
         _invoicesView!.IsVisible = tab == Tab.Invoices;
-        _topView!.IsVisible     = tab == Tab.TopProducts;
+        _topView!.IsVisible = tab == Tab.TopProducts;
 
-        for (var i = 0; i < 4; i++)
+        foreach (var view in new[] { _homeView, _tablesView, _invoicesView, _topView }.Where(v => v is not null).Cast<View>())
         {
-            var active = i == (int)tab;
-            _tabIconLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
-            _tabTextLabels[i].TextColor = active ? AppColors.Blue : AppColors.Muted;
+            view.Opacity = 1;
+            view.TranslationX = 0;
         }
+    }
 
-        if (tab == Tab.Home)
-        {
-            InvalidateChartsSoon();
-        }
+    private async Task AnimateTabTransitionAsync(View previousView, View nextView, int direction)
+    {
+        var width = Width > 0 ? Width : AppUi.ScreenWidth;
+        nextView.TranslationX = direction * width;
+        nextView.Opacity = 0.98;
+        nextView.IsVisible = true;
 
-        if (!_loading && _stores.Count > 0 && !_loadedTabs[(int)tab])
-        {
-            await LoadActiveTabAsync(silent: true, force: false);
-        }
+        var outgoing = previousView.TranslateTo(-direction * width * 0.28, 0, 180, Easing.CubicOut);
+        var incoming = nextView.TranslateTo(0, 0, 220, Easing.CubicOut);
+        await Task.WhenAll(outgoing, incoming);
+
+        previousView.IsVisible = false;
+        previousView.TranslationX = 0;
+        previousView.Opacity = 1;
+        nextView.TranslationX = 0;
+        nextView.Opacity = 1;
     }
 
     private void ApplyRangePreset()
