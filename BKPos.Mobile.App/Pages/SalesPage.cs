@@ -113,9 +113,9 @@ public sealed class SalesPage : ContentPage
     private View BuildLogoutDrawer()
     {
 #if IOS
-        var toggleW = AppUi.S(22);
-        var logoutW = AppUi.S(74);
-        var h = AppUi.S(32);
+        var toggleW = AppUi.S(20);
+        var logoutW = AppUi.S(72);
+        var h = AppUi.S(30);
 #else
         var toggleW = AppUi.S(32);
         var logoutW = AppUi.S(108);
@@ -145,17 +145,26 @@ public sealed class SalesPage : ContentPage
             Content = toggleArrow
         };
 
-        var logout = new Button
+        var logoutText = new Label
         {
             Text = "Đăng xuất",
-            BackgroundColor = Color.FromArgb("#B91C1C"),
             TextColor = Colors.White,
             FontAttributes = FontAttributes.Bold,
             FontSize = AppUi.S(10),
+            HorizontalTextAlignment = TextAlignment.Center,
+            VerticalTextAlignment = TextAlignment.Center
+        };
+
+        var logout = new Border
+        {
+            BackgroundColor = Color.FromArgb("#B91C1C"),
+            StrokeThickness = 0,
+            IsVisible = false,
             HeightRequest = h,
             WidthRequest = logoutW,
             Padding = new Thickness(AppUi.S(4), 0),
-            CornerRadius = 0
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 0 },
+            Content = logoutText
         };
 
         var drawer = new Grid
@@ -181,10 +190,21 @@ public sealed class SalesPage : ContentPage
         {
             isOpen = !isOpen;
             toggleArrow.Text = isOpen ? "›" : "‹";
+            if (isOpen)
+            {
+                logout.IsVisible = true;
+            }
+
             await drawer.TranslateTo(isOpen ? 0 : logoutW, 0, 160, Easing.CubicOut);
+            if (!isOpen)
+            {
+                logout.IsVisible = false;
+            }
         };
         toggle.GestureRecognizers.Add(tap);
-        logout.Clicked += async (_, _) => await LogoutAsync();
+        var logoutTap = new TapGestureRecognizer();
+        logoutTap.Tapped += async (_, _) => await LogoutAsync();
+        logout.GestureRecognizers.Add(logoutTap);
 
         drawer.Add(toggle, 0, 0);
         drawer.Add(logout, 1, 0);
@@ -383,6 +403,7 @@ public sealed class SalesPage : ContentPage
                 {
                     if (sender is BindableObject bindable && bindable.BindingContext is ProductDto product)
                     {
+                        await MarkTappedAsync(card);
                         await AddProductAsync(product);
                     }
                 };
@@ -502,6 +523,7 @@ public sealed class SalesPage : ContentPage
                 {
                     if (sender is BindableObject bindable && bindable.BindingContext is OrderLineCard line)
                     {
+                        await MarkTappedAsync(card);
                         await EditLineAsync(line);
                     }
                 };
@@ -557,6 +579,7 @@ public sealed class SalesPage : ContentPage
                 {
                     if (sender is BindableObject bindable && bindable.BindingContext is TableCard table)
                     {
+                        await MarkTappedAsync(card);
                         await OpenTableAsync(table.Source);
                     }
                 };
@@ -599,6 +622,53 @@ public sealed class SalesPage : ContentPage
         StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 12 },
         Content = entry
     };
+
+    private static async Task MarkTappedAsync(Border card)
+    {
+#if IOS
+        var stroke = card.Stroke;
+        var strokeThickness = card.StrokeThickness;
+        var background = card.BackgroundColor;
+
+        card.Stroke = AppUi.Blue;
+        card.StrokeThickness = 2;
+        card.BackgroundColor = AppUi.BlueSoft;
+        await card.ScaleTo(0.98, 55, Easing.CubicOut);
+        await card.ScaleTo(1, 85, Easing.CubicOut);
+
+        card.Stroke = stroke;
+        card.StrokeThickness = strokeThickness;
+        card.BackgroundColor = background;
+#else
+        await Task.CompletedTask;
+#endif
+    }
+
+#if IOS
+    private static void ToggleSplitLineSelection(
+        OrderLineCard line,
+        Border card,
+        Label check,
+        HashSet<string> selectedLineIds)
+    {
+        var selected = selectedLineIds.Contains(line.Source.Id);
+        if (selected)
+        {
+            selectedLineIds.Remove(line.Source.Id);
+            check.IsVisible = false;
+            card.Stroke = AppUi.Border;
+            card.StrokeThickness = 1;
+            card.BackgroundColor = AppUi.Surface;
+            return;
+        }
+
+        selectedLineIds.Add(line.Source.Id);
+        check.IsVisible = true;
+        card.Stroke = AppUi.Blue;
+        card.StrokeThickness = 2;
+        card.BackgroundColor = AppUi.BlueSoft;
+    }
+#endif
 
     private async Task LoadInitialAsync(bool force = false)
     {
@@ -1086,10 +1156,17 @@ public sealed class SalesPage : ContentPage
 
         var completion = new TaskCompletionSource<IReadOnlyList<OrderLineCard>?>();
         var completed = false;
+#if IOS
+        var selectedLineIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+#endif
         var list = new CollectionView
         {
             ItemsSource = lines,
+#if IOS
+            SelectionMode = SelectionMode.None,
+#else
             SelectionMode = SelectionMode.Multiple,
+#endif
             ItemTemplate = new DataTemplate(() =>
             {
                 var name = new Label { TextColor = AppUi.Ink, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(13) };
@@ -1098,11 +1175,23 @@ public sealed class SalesPage : ContentPage
                 summary.SetBinding(Label.TextProperty, nameof(OrderLineCard.Summary));
                 var total = new Label { TextColor = AppUi.Blue, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(12) };
                 total.SetBinding(Label.TextProperty, nameof(OrderLineCard.LineTotal));
+                var check = new Label
+                {
+                    Text = "✓",
+                    IsVisible = false,
+                    TextColor = AppUi.Blue,
+                    FontAttributes = FontAttributes.Bold,
+                    FontSize = AppUi.S(16),
+                    HorizontalTextAlignment = TextAlignment.Center,
+                    VerticalTextAlignment = TextAlignment.Center,
+                    Margin = new Thickness(0, 0, AppUi.S(8), 0)
+                };
                 var grid = new Grid
                 {
                     ColumnDefinitions =
                     {
                         new ColumnDefinition(GridLength.Star),
+                        new ColumnDefinition(GridLength.Auto),
                         new ColumnDefinition(GridLength.Auto)
                     },
                     RowDefinitions =
@@ -1114,9 +1203,23 @@ public sealed class SalesPage : ContentPage
                 };
                 grid.Add(name, 0, 0);
                 grid.Add(summary, 0, 1);
-                grid.Add(total, 1, 0);
+                grid.Add(check, 1, 0);
+                Grid.SetRowSpan(check, 2);
+                grid.Add(total, 2, 0);
                 Grid.SetRowSpan(total, 2);
-                return AppUi.CardView(grid, 8);
+                var card = AppUi.CardView(grid, 8);
+#if IOS
+                var tap = new TapGestureRecognizer();
+                tap.Tapped += (sender, _) =>
+                {
+                    if (sender is BindableObject bindable && bindable.BindingContext is OrderLineCard line)
+                    {
+                        ToggleSplitLineSelection(line, card, check, selectedLineIds);
+                    }
+                };
+                card.GestureRecognizers.Add(tap);
+#endif
+                return card;
             })
         };
 
@@ -1130,7 +1233,11 @@ public sealed class SalesPage : ContentPage
         };
         done.Clicked += async (_, _) =>
         {
+#if IOS
+            var selected = lines.Where(line => selectedLineIds.Contains(line.Source.Id)).ToList();
+#else
             var selected = list.SelectedItems.OfType<OrderLineCard>().ToList();
+#endif
             if (selected.Count == 0)
             {
                 await DisplayAlert("Tách bàn", "Vui lòng chọn ít nhất 1 món để tách.", "OK");
