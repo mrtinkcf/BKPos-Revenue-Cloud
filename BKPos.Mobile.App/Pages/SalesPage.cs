@@ -112,15 +112,21 @@ public sealed class SalesPage : ContentPage
 
     private View BuildLogoutDrawer()
     {
+#if IOS
+        var toggleW = AppUi.S(22);
+        var logoutW = AppUi.S(74);
+        var h = AppUi.S(32);
+#else
         var toggleW = AppUi.S(32);
         var logoutW = AppUi.S(108);
         var h = AppUi.S(40);
+#endif
 
         var toggleArrow = new Label
         {
             Text = "‹",
             TextColor = Colors.White,
-            FontSize = AppUi.S(22),
+            FontSize = AppUi.S(18),
             FontAttributes = FontAttributes.Bold,
             HorizontalTextAlignment = TextAlignment.Center,
             VerticalTextAlignment = TextAlignment.Center
@@ -145,10 +151,10 @@ public sealed class SalesPage : ContentPage
             BackgroundColor = Color.FromArgb("#B91C1C"),
             TextColor = Colors.White,
             FontAttributes = FontAttributes.Bold,
-            FontSize = AppUi.S(13),
+            FontSize = AppUi.S(10),
             HeightRequest = h,
             WidthRequest = logoutW,
-            Padding = new Thickness(AppUi.S(8), 0),
+            Padding = new Thickness(AppUi.S(4), 0),
             CornerRadius = 0
         };
 
@@ -159,7 +165,7 @@ public sealed class SalesPage : ContentPage
             TranslationX = logoutW,
             HorizontalOptions = LayoutOptions.End,
             VerticalOptions = LayoutOptions.Start,
-            Margin = new Thickness(0, AppUi.S(68), 0, 0),
+            Margin = new Thickness(0, AppUi.S(64), 0, 0),
             ZIndex = 10,
             ColumnDefinitions =
             {
@@ -352,7 +358,7 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _products,
-            SelectionMode = SelectionMode.Single,
+            SelectionMode = SelectionMode.None,
             ItemsLayout = new GridItemsLayout(2, ItemsLayoutOrientation.Vertical)
             {
                 HorizontalItemSpacing = 8,
@@ -366,16 +372,18 @@ public sealed class SalesPage : ContentPage
                 price.SetBinding(Label.TextProperty, new Binding(nameof(ProductDto.Price), stringFormat: "{0:N0}đ"));
                 var unit = new Label { TextColor = AppUi.Muted, FontSize = AppUi.S(10) };
                 unit.SetBinding(Label.TextProperty, nameof(ProductDto.UnitName));
-                return AppUi.CardView(new VerticalStackLayout { Spacing = 2, Children = { name, unit, price } }, 8);
+                var card = AppUi.CardView(new VerticalStackLayout { Spacing = 2, Children = { name, unit, price } }, 8);
+                var tap = new TapGestureRecognizer();
+                tap.Tapped += async (sender, _) =>
+                {
+                    if (sender is BindableObject bindable && bindable.BindingContext is ProductDto product)
+                    {
+                        await AddProductAsync(product);
+                    }
+                };
+                card.GestureRecognizers.Add(tap);
+                return card;
             })
-        };
-        list.SelectionChanged += async (_, e) =>
-        {
-            if (e.CurrentSelection.FirstOrDefault() is ProductDto product)
-            {
-                list.SelectedItem = null;
-                await AddProductAsync(product);
-            }
         };
         return list;
     }
@@ -385,7 +393,7 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _lines,
-            SelectionMode = SelectionMode.Single,
+            SelectionMode = SelectionMode.None,
             ItemTemplate = new DataTemplate(() =>
             {
                 var name = new Label { TextColor = AppUi.Ink, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(13), LineBreakMode = LineBreakMode.TailTruncation };
@@ -467,16 +475,18 @@ public sealed class SalesPage : ContentPage
                 grid.Add(note, 0, 2);
                 grid.Add(right, 1, 0);
                 Grid.SetRowSpan(right, 3);
-                return AppUi.CardView(grid, 7);
+                var card = AppUi.CardView(grid, 7);
+                var tap = new TapGestureRecognizer();
+                tap.Tapped += async (sender, _) =>
+                {
+                    if (sender is BindableObject bindable && bindable.BindingContext is OrderLineCard line)
+                    {
+                        await EditLineAsync(line);
+                    }
+                };
+                card.GestureRecognizers.Add(tap);
+                return card;
             })
-        };
-        list.SelectionChanged += async (_, e) =>
-        {
-            if (e.CurrentSelection.FirstOrDefault() is OrderLineCard line)
-            {
-                list.SelectedItem = null;
-                await EditLineAsync(line);
-            }
         };
         return list;
     }
@@ -486,7 +496,7 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _tables,
-            SelectionMode = SelectionMode.Single,
+            SelectionMode = SelectionMode.None,
             ItemTemplate = new DataTemplate(() =>
             {
                 var name = new Label { TextColor = AppUi.Ink, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(12), LineBreakMode = LineBreakMode.TailTruncation };
@@ -505,16 +515,17 @@ public sealed class SalesPage : ContentPage
                 };
                 card.SetBinding(Border.BackgroundColorProperty, nameof(TableCard.Background));
                 card.SetBinding(Border.StrokeProperty, nameof(TableCard.BorderColor));
+                var tap = new TapGestureRecognizer();
+                tap.Tapped += async (sender, _) =>
+                {
+                    if (sender is BindableObject bindable && bindable.BindingContext is TableCard table)
+                    {
+                        await OpenTableAsync(table.Source);
+                    }
+                };
+                card.GestureRecognizers.Add(tap);
                 return card;
             })
-        };
-        list.SelectionChanged += async (_, e) =>
-        {
-            if (e.CurrentSelection.FirstOrDefault() is TableCard table)
-            {
-                list.SelectedItem = null;
-                await OpenTableAsync(table.Source);
-            }
         };
         return list;
     }
