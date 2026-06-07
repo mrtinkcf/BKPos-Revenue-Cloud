@@ -78,7 +78,7 @@ jobs:
         run: dotnet workload install maui-ios
 
       - name: Restore
-        run: dotnet restore "${{ env.PROJECT_PATH }}" -p:TargetFrameworks=net10.0-ios -p:RuntimeIdentifier=ios-arm64
+        run: dotnet restore "${{ env.PROJECT_PATH }}" -p:RuntimeIdentifier=ios-arm64
 
       - name: Prepare Apple signing assets
         env:
@@ -144,7 +144,6 @@ jobs:
             -f net10.0-ios \
             -c Release \
             --no-restore \
-            -p:TargetFrameworks=net10.0-ios \
             -p:RuntimeIdentifier=ios-arm64 \
             -p:ArchiveOnBuild=true \
             -p:BuildIpa=true \
