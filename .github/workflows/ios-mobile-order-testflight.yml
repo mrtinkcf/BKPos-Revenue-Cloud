@@ -97,8 +97,24 @@ jobs:
           PROFILE_PATH="${RUNNER_TEMP}/bkpos-mobile-order-ios.mobileprovision"
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
 
-          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
-          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          python3 - "$CERT_PATH" "$PROFILE_PATH" <<'PY'
+          import base64
+          import os
+          import sys
+
+          cert_path, profile_path = sys.argv[1], sys.argv[2]
+          assets = [
+              ("IOS_CERTIFICATE_P12_BASE64", cert_path),
+              ("IOS_PROVISIONING_PROFILE_BASE64", profile_path),
+          ]
+
+          for env_name, output_path in assets:
+              value = os.environ.get(env_name, "").strip()
+              if not value:
+                  raise SystemExit(f"{env_name} is empty")
+              with open(output_path, "wb") as handle:
+                  handle.write(base64.b64decode(value))
+          PY
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
           security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
@@ -238,7 +254,17 @@ jobs:
           fi
 
           mkdir -p "$HOME/private_keys"
-          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+          python3 - "$HOME/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8" <<'PY'
+          import base64
+          import os
+          import sys
+
+          value = os.environ.get("APPSTORE_API_KEY_BASE64", "").strip()
+          if not value:
+              raise SystemExit("APPSTORE_API_KEY_BASE64 is empty")
+          with open(sys.argv[1], "wb") as handle:
+              handle.write(base64.b64decode(value))
+          PY
 
           xcrun altool --upload-app \
             --type ios \
