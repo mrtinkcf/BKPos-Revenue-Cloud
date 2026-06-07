@@ -1,0 +1,253 @@
+name: Build iOS Mobile Order App to TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Upload IPA to TestFlight"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  PROJECT_PATH: "BKPos.Mobile.App/BKPos.Mobile.App.csproj"
+  IPA_OUTPUT_DIR: "artifacts/ios-mobile-order"
+
+jobs:
+  build-ios:
+    name: Build iOS Mobile Order IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      KEYCHAIN_PATH: "/tmp/bkpos-mobile-order-ios-signing.keychain-db"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Select Xcode 26.5 toolchain
+        run: |
+          set -euo pipefail
+
+          SELECTED_DEVELOPER=""
+          for app in /Applications/Xcode_26.5_beta_2.app /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
+            [ -d "$app" ] || continue
+            developer="$app/Contents/Developer"
+            [ -x "$developer/usr/bin/xcodebuild" ] || continue
+            version="$(DEVELOPER_DIR="$developer" "$developer/usr/bin/xcodebuild" -version | head -n 1 || true)"
+            macos_sdk="$developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+            echo "Candidate: $app -> $version"
+            if echo "$version" | grep -q "Xcode 26.5" \
+              && [ -d "$macos_sdk" ] \
+              && DEVELOPER_DIR="$developer" xcrun --sdk macosx --find clang >/dev/null 2>&1 \
+              && DEVELOPER_DIR="$developer" xcrun --find ibtool >/dev/null 2>&1 \
+              && DEVELOPER_DIR="$developer" xcrun --find actool >/dev/null 2>&1; then
+              SELECTED_DEVELOPER="$developer"
+              break
+            fi
+          done
+
+          if [ -z "$SELECTED_DEVELOPER" ]; then
+            echo "Xcode 26.5 with clang, ibtool, actool and MacOSX.sdk is required but was not found."
+            ls -1 /Applications | grep -i Xcode || true
+            exit 1
+          fi
+
+          sudo xcode-select -s "$SELECTED_DEVELOPER"
+          export DEVELOPER_DIR="$SELECTED_DEVELOPER"
+          echo "DEVELOPER_DIR=$SELECTED_DEVELOPER" >> "$GITHUB_ENV"
+          xcrun -k
+          xcodebuild -version
+          xcrun --sdk macosx --find clang
+          xcrun --find ibtool
+          xcrun --find actool
+
+      - name: Install MAUI iOS workload
+        run: dotnet workload install maui-ios
+
+      - name: Restore
+        run: dotnet restore "${{ env.PROJECT_PATH }}" -p:TargetFrameworks=net10.0-ios -p:RuntimeIdentifier=ios-arm64
+
+      - name: Prepare Apple signing assets
+        env:
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_MOBILE_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_CERTIFICATE_P12_BASE64:-}" ] || [ -z "${IOS_CERTIFICATE_PASSWORD:-}" ] || [ -z "${IOS_PROVISIONING_PROFILE_BASE64:-}" ] || [ -z "${KEYCHAIN_PASSWORD:-}" ]; then
+            echo "Missing iOS signing secrets. Configure IOS_CERTIFICATE_P12_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_MOBILE_PROVISIONING_PROFILE_BASE64, IOS_KEYCHAIN_PASSWORD."
+            exit 1
+          fi
+
+          CERT_PATH="${RUNNER_TEMP}/bkpos-mobile-order-ios-cert.p12"
+          PROFILE_PATH="${RUNNER_TEMP}/bkpos-mobile-order-ios.mobileprovision"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+          security import "$CERT_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security list-keychain -d user -s "${KEYCHAIN_PATH}" login.keychain-db
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "${KEYCHAIN_PATH}"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin <<< "$(security cms -D -i "$PROFILE_PATH")")
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+          echo "Installed provisioning profile ${PROFILE_UUID}."
+
+      - name: Publish iOS IPA
+        env:
+          IOS_CODESIGN_KEY: ${{ secrets.IOS_CODESIGN_KEY }}
+          IOS_CODESIGN_PROVISION: ${{ secrets.IOS_MOBILE_CODESIGN_PROVISION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_CODESIGN_KEY:-}" ] || [ -z "${IOS_CODESIGN_PROVISION:-}" ]; then
+            echo "Missing IOS_CODESIGN_KEY or IOS_MOBILE_CODESIGN_PROVISION secrets."
+            exit 1
+          fi
+
+          dotnet publish "${PROJECT_PATH}" \
+            -f net10.0-ios \
+            -c Release \
+            --no-restore \
+            -p:TargetFrameworks=net10.0-ios \
+            -p:RuntimeIdentifier=ios-arm64 \
+            -p:ArchiveOnBuild=true \
+            -p:BuildIpa=true \
+            -p:CodesignKey="${IOS_CODESIGN_KEY}" \
+            -p:CodesignProvision="${IOS_CODESIGN_PROVISION}"
+
+          mkdir -p "${IPA_OUTPUT_DIR}"
+          IPA_PATH=$(find BKPos.Mobile.App/bin/Release/net10.0-ios -name "*.ipa" -type f | head -n 1)
+          if [ -z "${IPA_PATH}" ]; then
+            echo "IPA was not generated."
+            exit 1
+          fi
+
+          POSTPROCESS_DIR="${RUNNER_TEMP}/bkpos-mobile-order-ipa"
+          ASSET_ROOT="${RUNNER_TEMP}/bkpos-mobile-order-assets/Assets.xcassets"
+          APPICON_DIR="${ASSET_ROOT}/appicon.appiconset"
+          COMPILED_ASSETS="${RUNNER_TEMP}/bkpos-mobile-order-compiled-assets"
+          PARTIAL_INFO="${RUNNER_TEMP}/bkpos-mobile-order-asset-info.plist"
+          ENTITLEMENTS_PATH="${RUNNER_TEMP}/bkpos-mobile-order-entitlements.plist"
+          PATCHED_IPA="${RUNNER_TEMP}/BKPos.Mobile.App.patched.ipa"
+
+          rm -rf "${POSTPROCESS_DIR}" "${ASSET_ROOT}" "${COMPILED_ASSETS}" "${PATCHED_IPA}"
+          mkdir -p "${POSTPROCESS_DIR}" "${APPICON_DIR}" "${COMPILED_ASSETS}"
+          unzip -q "${IPA_PATH}" -d "${POSTPROCESS_DIR}"
+          APP_DIR=$(find "${POSTPROCESS_DIR}/Payload" -maxdepth 1 -name "*.app" -type d | head -n 1)
+          if [ -z "${APP_DIR}" ]; then
+            echo "Unable to locate app bundle inside IPA."
+            exit 1
+          fi
+
+          cp BKPos.Mobile.App/Platforms/iOS/Icons/*.png "${APPICON_DIR}/"
+          cat > "${APPICON_DIR}/Contents.json" <<'JSON'
+          {
+            "images": [
+              { "idiom": "iphone", "size": "20x20", "scale": "2x", "filename": "Icon-20@2x.png" },
+              { "idiom": "iphone", "size": "20x20", "scale": "3x", "filename": "Icon-20@3x.png" },
+              { "idiom": "iphone", "size": "29x29", "scale": "2x", "filename": "Icon-29@2x.png" },
+              { "idiom": "iphone", "size": "29x29", "scale": "3x", "filename": "Icon-29@3x.png" },
+              { "idiom": "iphone", "size": "40x40", "scale": "2x", "filename": "Icon-40@2x.png" },
+              { "idiom": "iphone", "size": "40x40", "scale": "3x", "filename": "Icon-40@3x.png" },
+              { "idiom": "iphone", "size": "60x60", "scale": "2x", "filename": "Icon-60@2x.png" },
+              { "idiom": "iphone", "size": "60x60", "scale": "3x", "filename": "Icon-60@3x.png" },
+              { "idiom": "ipad", "size": "20x20", "scale": "1x", "filename": "Icon-20.png" },
+              { "idiom": "ipad", "size": "20x20", "scale": "2x", "filename": "Icon-20@2x.png" },
+              { "idiom": "ipad", "size": "29x29", "scale": "1x", "filename": "Icon-29.png" },
+              { "idiom": "ipad", "size": "29x29", "scale": "2x", "filename": "Icon-29@2x.png" },
+              { "idiom": "ipad", "size": "40x40", "scale": "1x", "filename": "Icon-40.png" },
+              { "idiom": "ipad", "size": "40x40", "scale": "2x", "filename": "Icon-40@2x.png" },
+              { "idiom": "ipad", "size": "76x76", "scale": "1x", "filename": "Icon-76.png" },
+              { "idiom": "ipad", "size": "76x76", "scale": "2x", "filename": "Icon-76@2x.png" },
+              { "idiom": "ipad", "size": "83.5x83.5", "scale": "2x", "filename": "Icon-83.5@2x.png" },
+              { "idiom": "ios-marketing", "size": "1024x1024", "scale": "1x", "filename": "Icon-1024.png" }
+            ],
+            "info": { "version": 1, "author": "xcode" }
+          }
+          JSON
+
+          xcrun actool "${ASSET_ROOT}" \
+            --compile "${COMPILED_ASSETS}" \
+            --platform iphoneos \
+            --minimum-deployment-target 15.0 \
+            --target-device iphone \
+            --target-device ipad \
+            --app-icon appicon \
+            --output-partial-info-plist "${PARTIAL_INFO}"
+
+          if [ ! -f "${COMPILED_ASSETS}/Assets.car" ]; then
+            echo "Assets.car was not generated."
+            exit 1
+          fi
+          cp "${COMPILED_ASSETS}/Assets.car" "${APP_DIR}/Assets.car"
+
+          /usr/libexec/PlistBuddy -c "Delete CFBundleIconName" "${APP_DIR}/Info.plist" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add CFBundleIconName string appicon" "${APP_DIR}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete UIRequiresFullScreen" "${APP_DIR}/Info.plist" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c "Add UIRequiresFullScreen bool true" "${APP_DIR}/Info.plist"
+
+          /usr/bin/codesign -d --entitlements :- "${APP_DIR}" > "${ENTITLEMENTS_PATH}" 2>/dev/null || true
+          if [ -s "${ENTITLEMENTS_PATH}" ]; then
+            /usr/bin/codesign --force --sign "${IOS_CODESIGN_KEY}" --entitlements "${ENTITLEMENTS_PATH}" --timestamp=none "${APP_DIR}"
+          else
+            /usr/bin/codesign --force --sign "${IOS_CODESIGN_KEY}" --timestamp=none "${APP_DIR}"
+          fi
+
+          (cd "${POSTPROCESS_DIR}" && zip -qry "${PATCHED_IPA}" Payload)
+          cp "${PATCHED_IPA}" "${IPA_OUTPUT_DIR}/BKPos.Mobile.App.ipa"
+          echo "IPA copied to ${IPA_OUTPUT_DIR}/BKPos.Mobile.App.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BKPos.Mobile.App-iOS-IPA
+          path: ${{ env.IPA_OUTPUT_DIR }}/BKPos.Mobile.App.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to TestFlight
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight == 'true' }}
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_BASE64: ${{ secrets.APPSTORE_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPSTORE_API_KEY_ID:-}" ] || [ -z "${APPSTORE_ISSUER_ID:-}" ] || [ -z "${APPSTORE_API_KEY_BASE64:-}" ]; then
+            echo "Missing App Store Connect secrets."
+            exit 1
+          fi
+
+          mkdir -p "$HOME/private_keys"
+          echo "$APPSTORE_API_KEY_BASE64" | base64 --decode > "$HOME/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${IPA_OUTPUT_DIR}/BKPos.Mobile.App.ipa" \
+            --apiKey "${APPSTORE_API_KEY_ID}" \
+            --apiIssuer "${APPSTORE_ISSUER_ID}"
+
+      - name: Cleanup signing assets
+        if: always()
+        run: |
+          security delete-keychain "${KEYCHAIN_PATH}" 2>/dev/null || true
+          rm -rf "$HOME/private_keys/AuthKey_"*.p8 2>/dev/null || true

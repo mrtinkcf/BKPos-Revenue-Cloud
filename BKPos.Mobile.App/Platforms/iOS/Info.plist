@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>LSRequiresIPhoneOS</key>
+    <true />
+    <key>UIDeviceFamily</key>
+    <array>
+      <integer>1</integer>
+      <integer>2</integer>
+    </array>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+      <string>arm64</string>
+    </array>
+    <key>NSCameraUsageDescription</key>
+    <string>BKPos Mobile dùng camera để quét QR kết nối máy chủ.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>BKPos Mobile cần truy cập mạng nội bộ để kết nối BKPos Mobile Server trong quán.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+      <key>NSAllowsArbitraryLoads</key>
+      <true />
+      <key>NSAllowsLocalNetworking</key>
+      <true />
+    </dict>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+      <string>UIInterfaceOrientationPortrait</string>
+      <string>UIInterfaceOrientationLandscapeLeft</string>
+      <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+      <string>UIInterfaceOrientationPortrait</string>
+      <string>UIInterfaceOrientationPortraitUpsideDown</string>
+      <string>UIInterfaceOrientationLandscapeLeft</string>
+      <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>CFBundleIconName</key>
+    <string>appicon</string>
+    <key>CFBundleIcons</key>
+    <dict>
+      <key>CFBundlePrimaryIcon</key>
+      <dict>
+        <key>CFBundleIconFiles</key>
+        <array>
+          <string>Icon-20</string>
+          <string>Icon-29</string>
+          <string>Icon-40</string>
+          <string>Icon-60</string>
+        </array>
+        <key>CFBundleIconName</key>
+        <string>appicon</string>
+      </dict>
+    </dict>
+    <key>CFBundleIcons~ipad</key>
+    <dict>
+      <key>CFBundlePrimaryIcon</key>
+      <dict>
+        <key>CFBundleIconFiles</key>
+        <array>
+          <string>Icon-20</string>
+          <string>Icon-29</string>
+          <string>Icon-40</string>
+          <string>Icon-76</string>
+          <string>Icon-83.5</string>
+        </array>
+        <key>CFBundleIconName</key>
+        <string>appicon</string>
+      </dict>
+    </dict>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIRequiresFullScreen</key>
+    <true />
+  </dict>
+</plist>
