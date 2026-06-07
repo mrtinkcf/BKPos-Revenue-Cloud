@@ -109,7 +109,8 @@ jobs:
           ]
 
           for env_name, output_path in assets:
-              value = os.environ.get(env_name, "").strip()
+              value = os.environ.get(env_name, "").strip().lstrip("\ufeff")
+              value = "".join(ch for ch in value if ch.isalnum() or ch in "+/=_-")
               if not value:
                   raise SystemExit(f"{env_name} is empty")
               with open(output_path, "wb") as handle:
@@ -259,7 +260,8 @@ jobs:
           import os
           import sys
 
-          value = os.environ.get("APPSTORE_API_KEY_BASE64", "").strip()
+          value = os.environ.get("APPSTORE_API_KEY_BASE64", "").strip().lstrip("\ufeff")
+          value = "".join(ch for ch in value if ch.isalnum() or ch in "+/=_-")
           if not value:
               raise SystemExit("APPSTORE_API_KEY_BASE64 is empty")
           with open(sys.argv[1], "wb") as handle:
