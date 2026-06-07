@@ -358,7 +358,11 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _products,
+#if IOS
             SelectionMode = SelectionMode.None,
+#else
+            SelectionMode = SelectionMode.Single,
+#endif
             ItemsLayout = new GridItemsLayout(2, ItemsLayoutOrientation.Vertical)
             {
                 HorizontalItemSpacing = 8,
@@ -373,6 +377,7 @@ public sealed class SalesPage : ContentPage
                 var unit = new Label { TextColor = AppUi.Muted, FontSize = AppUi.S(10) };
                 unit.SetBinding(Label.TextProperty, nameof(ProductDto.UnitName));
                 var card = AppUi.CardView(new VerticalStackLayout { Spacing = 2, Children = { name, unit, price } }, 8);
+#if IOS
                 var tap = new TapGestureRecognizer();
                 tap.Tapped += async (sender, _) =>
                 {
@@ -382,9 +387,20 @@ public sealed class SalesPage : ContentPage
                     }
                 };
                 card.GestureRecognizers.Add(tap);
+#endif
                 return card;
             })
         };
+#if !IOS
+        list.SelectionChanged += async (_, e) =>
+        {
+            if (e.CurrentSelection.FirstOrDefault() is ProductDto product)
+            {
+                list.SelectedItem = null;
+                await AddProductAsync(product);
+            }
+        };
+#endif
         return list;
     }
 
@@ -393,7 +409,11 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _lines,
+#if IOS
             SelectionMode = SelectionMode.None,
+#else
+            SelectionMode = SelectionMode.Single,
+#endif
             ItemTemplate = new DataTemplate(() =>
             {
                 var name = new Label { TextColor = AppUi.Ink, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(13), LineBreakMode = LineBreakMode.TailTruncation };
@@ -476,6 +496,7 @@ public sealed class SalesPage : ContentPage
                 grid.Add(right, 1, 0);
                 Grid.SetRowSpan(right, 3);
                 var card = AppUi.CardView(grid, 7);
+#if IOS
                 var tap = new TapGestureRecognizer();
                 tap.Tapped += async (sender, _) =>
                 {
@@ -485,9 +506,20 @@ public sealed class SalesPage : ContentPage
                     }
                 };
                 card.GestureRecognizers.Add(tap);
+#endif
                 return card;
             })
         };
+#if !IOS
+        list.SelectionChanged += async (_, e) =>
+        {
+            if (e.CurrentSelection.FirstOrDefault() is OrderLineCard line)
+            {
+                list.SelectedItem = null;
+                await EditLineAsync(line);
+            }
+        };
+#endif
         return list;
     }
 
@@ -496,7 +528,11 @@ public sealed class SalesPage : ContentPage
         var list = new CollectionView
         {
             ItemsSource = _tables,
+#if IOS
             SelectionMode = SelectionMode.None,
+#else
+            SelectionMode = SelectionMode.Single,
+#endif
             ItemTemplate = new DataTemplate(() =>
             {
                 var name = new Label { TextColor = AppUi.Ink, FontAttributes = FontAttributes.Bold, FontSize = AppUi.S(12), LineBreakMode = LineBreakMode.TailTruncation };
@@ -515,6 +551,7 @@ public sealed class SalesPage : ContentPage
                 };
                 card.SetBinding(Border.BackgroundColorProperty, nameof(TableCard.Background));
                 card.SetBinding(Border.StrokeProperty, nameof(TableCard.BorderColor));
+#if IOS
                 var tap = new TapGestureRecognizer();
                 tap.Tapped += async (sender, _) =>
                 {
@@ -524,9 +561,20 @@ public sealed class SalesPage : ContentPage
                     }
                 };
                 card.GestureRecognizers.Add(tap);
+#endif
                 return card;
             })
         };
+#if !IOS
+        list.SelectionChanged += async (_, e) =>
+        {
+            if (e.CurrentSelection.FirstOrDefault() is TableCard table)
+            {
+                list.SelectedItem = null;
+                await OpenTableAsync(table.Source);
+            }
+        };
+#endif
         return list;
     }
 
