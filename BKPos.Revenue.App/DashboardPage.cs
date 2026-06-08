@@ -36,6 +36,13 @@ public sealed class DashboardPage : ContentPage
     private readonly Label _rangeRevenue = ValueLabel(AppUi.S(22), AppColors.Blue);
     private readonly Label _rangeInvoices = new() { FontSize = AppUi.S(14), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy };
     private readonly Label _rangePayments = new() { FontSize = AppUi.S(12), TextColor = AppColors.Muted, LineBreakMode = LineBreakMode.WordWrap };
+    private readonly MauiDatePicker _homeInventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _homeInventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiPicker _homeInventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly Label _homeInventoryImportValue = ValueLabel(AppUi.S(20), AppColors.Green);
+    private readonly Label _homeInventoryExportValue = ValueLabel(AppUi.S(20), AppColors.Orange);
+    private readonly Label _homeInventoryStockValue = ValueLabel(AppUi.S(20), AppColors.Blue);
+    private readonly Label _homeInventoryStatus = new() { FontSize = AppUi.S(12), TextColor = AppColors.Muted, LineBreakMode = LineBreakMode.WordWrap };
     private readonly VerticalStackLayout _paymentPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _dailyPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _topPanel = new() { Spacing = 8 };
@@ -85,6 +92,16 @@ public sealed class DashboardPage : ContentPage
         HeightRequest = AppUi.S(40),
         FontSize = AppUi.S(12)
     };
+    private readonly Button _homeInventoryButton = new()
+    {
+        Text = "Xem thống kê kho",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 12,
+        HeightRequest = AppUi.S(44),
+        FontSize = AppUi.S(13),
+        FontAttributes = FontAttributes.Bold
+    };
     private readonly Button _inventoryFilterButton = new()
     {
         Text = "Xem kho hàng",
@@ -102,6 +119,7 @@ public sealed class DashboardPage : ContentPage
     private bool _updatingRangePreset;
     private bool _updatingInvoicePreset;
     private bool _updatingInventoryPreset;
+    private bool _updatingHomeInventoryPreset;
     private int _invoicePage = 1;
     private List<StoreDto> _stores = [];
     private string _storeTimezone = "Asia/Ho_Chi_Minh";
@@ -216,6 +234,21 @@ public sealed class DashboardPage : ContentPage
         _fromPicker.DateSelected += (_, _) => MarkCustomRange();
         _toPicker.DateSelected += (_, _) => MarkCustomRange();
         _rangePresetPicker.SelectedIndex = 2;
+
+        _homeInventoryButton.Clicked += async (_, _) => await LoadHomeInventoryAsync();
+        _homeInventoryPresetPicker.Items.Add("Hôm nay");
+        _homeInventoryPresetPicker.Items.Add("Hôm qua");
+        _homeInventoryPresetPicker.Items.Add("7 ngày gần nhất");
+        _homeInventoryPresetPicker.Items.Add("Tháng trước");
+        _homeInventoryPresetPicker.Items.Add("Tùy chọn");
+        _homeInventoryPresetPicker.SelectedIndexChanged += async (_, _) =>
+        {
+            ApplyHomeInventoryPreset();
+            await LoadHomeInventoryAsync(silent: true);
+        };
+        _homeInventoryFromPicker.DateSelected += (_, _) => MarkCustomHomeInventoryRange();
+        _homeInventoryToPicker.DateSelected += (_, _) => MarkCustomHomeInventoryRange();
+        _homeInventoryPresetPicker.SelectedIndex = 0;
 
         _invoicePresetPicker.Items.Add("Hôm nay");
         _invoicePresetPicker.Items.Add("Hôm qua");
@@ -337,11 +370,56 @@ public sealed class DashboardPage : ContentPage
             Children =
             {
                 new Label { Text = "Tổng doanh thu", TextColor = AppColors.Muted, FontSize = AppUi.S(12) },
-                _rangeRevenue, _rangeInvoices, _rangePayments
+                _rangeRevenue, _rangeInvoices
             }
         };
         rangeGrid.Add(rangeSummary, 0, 3);
         Grid.SetColumnSpan(rangeSummary, 2);
+
+        var inventoryFilterGrid = new Grid
+        {
+            ColumnSpacing = AppUi.S(8),
+            RowSpacing = AppUi.S(10),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto)
+            }
+        };
+        var inventoryPresetShell = InputShell(_homeInventoryPresetPicker);
+        inventoryFilterGrid.Add(inventoryPresetShell, 0, 0);
+        Grid.SetColumnSpan(inventoryPresetShell, 2);
+        inventoryFilterGrid.Add(InputShell(_homeInventoryFromPicker), 0, 1);
+        inventoryFilterGrid.Add(InputShell(_homeInventoryToPicker), 1, 1);
+        inventoryFilterGrid.Add(_homeInventoryButton, 0, 2);
+        Grid.SetColumnSpan(_homeInventoryButton, 2);
+
+        var inventoryStats = new Grid
+        {
+            ColumnSpacing = AppUi.S(8),
+            RowSpacing = AppUi.S(8),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto)
+            }
+        };
+        inventoryStats.Add(SummaryCard("Tổng nhập kho", _homeInventoryImportValue, AppColors.Green), 0, 0);
+        inventoryStats.Add(SummaryCard("Tổng xuất kho", _homeInventoryExportValue, AppColors.Orange), 1, 0);
+        var stockCard = SummaryCard("Tổng giá trị tồn kho", _homeInventoryStockValue, AppColors.Blue);
+        inventoryStats.Add(stockCard, 0, 1);
+        Grid.SetColumnSpan(stockCard, 2);
 
         return Refreshable(new MauiScrollView
         {
@@ -355,10 +433,13 @@ public sealed class DashboardPage : ContentPage
                     TodaySummaryBadge(),
                     SummaryGrid(),
                     Section("Báo cáo khoảng ngày", rangeGrid),
+                    Section("Thống kê kho", new VerticalStackLayout
+                    {
+                        Spacing = AppUi.S(10),
+                        Children = { inventoryFilterGrid, inventoryStats, _homeInventoryStatus }
+                    }),
                     Section("Doanh thu 7 ngày",
-                        new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _lineChart, _dailyPanel } }),
-                    Section("Phương thức thanh toán",
-                        new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _pieChart, _paymentPanel } })
+                        new VerticalStackLayout { Spacing = AppUi.S(10), Children = { _lineChart, _dailyPanel } })
                 }
             }
         });
@@ -774,6 +855,45 @@ public sealed class DashboardPage : ContentPage
         _rangePresetPicker.SelectedIndex = 4;
     }
 
+    private void ApplyHomeInventoryPreset()
+    {
+        var today = DateTime.Today;
+        _updatingHomeInventoryPreset = true;
+        switch (_homeInventoryPresetPicker.SelectedIndex)
+        {
+            case 0:
+                _homeInventoryFromPicker.Date = today;
+                _homeInventoryToPicker.Date = today;
+                break;
+            case 1:
+                _homeInventoryFromPicker.Date = today.AddDays(-1);
+                _homeInventoryToPicker.Date = today.AddDays(-1);
+                break;
+            case 3:
+                var firstThisMonth = new DateTime(today.Year, today.Month, 1);
+                _homeInventoryFromPicker.Date = firstThisMonth.AddMonths(-1);
+                _homeInventoryToPicker.Date = firstThisMonth.AddDays(-1);
+                break;
+            case 2:
+                _homeInventoryFromPicker.Date = today.AddDays(-6);
+                _homeInventoryToPicker.Date = today;
+                break;
+            default:
+                break;
+        }
+        _updatingHomeInventoryPreset = false;
+    }
+
+    private void MarkCustomHomeInventoryRange()
+    {
+        if (_updatingHomeInventoryPreset)
+        {
+            return;
+        }
+
+        _homeInventoryPresetPicker.SelectedIndex = 4;
+    }
+
     private void ApplyInvoicePreset()
     {
         var today = DateTime.Today;
@@ -1088,9 +1208,9 @@ public sealed class DashboardPage : ContentPage
             _avg.Text = RevenueApiClient.Money(today.Summary.AverageInvoiceValue);
             _cancelled.Text = today.Summary.CancelledInvoiceCount.ToString("N0");
             RenderDaily(today.Revenue7Days, today.Revenue7Days);
-            RenderPayment(today.PaymentBreakdown);
             InvalidateChartsSoon();
             await LoadRangeAsync(silent: true);
+            await LoadHomeInventoryAsync(silent: true);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -1136,8 +1256,6 @@ public sealed class DashboardPage : ContentPage
             var range = await _api.RangeAsync(from, to, _session.StoreId);
             _rangeRevenue.Text = RevenueApiClient.Money(range.Summary.Revenue);
             _rangeInvoices.Text = $"{range.Summary.InvoiceCount:N0} hóa đơn, {range.Summary.CancelledInvoiceCount:N0} hủy";
-            _rangePayments.Text =
-                $"Tiền mặt {RevenueApiClient.Money(range.Summary.CashAmount)}  •  CK {RevenueApiClient.Money(range.Summary.TransferAmount)}\nThẻ {RevenueApiClient.Money(range.Summary.CardAmount)}  •  Khác {RevenueApiClient.Money(range.Summary.OtherAmount)}";
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -1149,6 +1267,41 @@ public sealed class DashboardPage : ContentPage
         finally
         {
             _rangeButton.IsEnabled = true;
+        }
+    }
+
+    private async Task LoadHomeInventoryAsync(bool silent = false)
+    {
+        if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
+        var from = PickerDate(_homeInventoryFromPicker);
+        var to = PickerDate(_homeInventoryToPicker);
+        if (from.Date > to.Date)
+        {
+            if (!silent)
+                await DisplayAlert("Khoảng ngày không hợp lệ", "Từ ngày phải nhỏ hơn hoặc bằng đến ngày.", "OK");
+            return;
+        }
+
+        try
+        {
+            _homeInventoryButton.IsEnabled = false;
+            var inventory = await _api.InventoryAsync(from, to, _session.StoreId);
+            RenderHomeInventory(inventory);
+            UpdateOfflineBanner();
+        }
+        catch (Exception ex)
+        {
+            _homeInventoryImportValue.Text = RevenueApiClient.Money(0);
+            _homeInventoryExportValue.Text = RevenueApiClient.Money(0);
+            _homeInventoryStockValue.Text = RevenueApiClient.Money(0);
+            _homeInventoryStatus.Text = FriendlyDataError(ex);
+            UpdateOfflineBanner();
+            if (!silent)
+                await DisplayAlert("Không tải được thống kê kho", ex.Message, "OK");
+        }
+        finally
+        {
+            _homeInventoryButton.IsEnabled = true;
         }
     }
 
@@ -1265,6 +1418,29 @@ public sealed class DashboardPage : ContentPage
             _paymentPanel.Add(BarRow(PaymentLabel(p.Method), p.Amount, max, AppColors.Green));
         if (_paymentPanel.Children.Count == 0)
             _paymentPanel.Add(EmptyLabel("Chưa có dữ liệu thanh toán."));
+    }
+
+    private void RenderHomeInventory(InventoryReportResponse report)
+    {
+        var rows = report.Items;
+        var importValue = rows.Sum(item => item.ImportQty * item.LastImportPrice);
+        var exportValue = rows.Sum(item => item.TotalExportQty * item.LastImportPrice);
+
+        var latestRows = rows
+            .GroupBy(item => string.IsNullOrWhiteSpace(item.ProductId) ? item.ProductName : item.ProductId)
+            .Select(group => group
+                .OrderByDescending(item => ParseReportDate(item.BusinessDate))
+                .ThenByDescending(item => item.UpdatedAt ?? DateTimeOffset.MinValue)
+                .First())
+            .ToList();
+        var stockValue = latestRows.Sum(item => item.ClosingQty * item.LastImportPrice);
+
+        _homeInventoryImportValue.Text = RevenueApiClient.Money(importValue);
+        _homeInventoryExportValue.Text = RevenueApiClient.Money(exportValue);
+        _homeInventoryStockValue.Text = RevenueApiClient.Money(stockValue);
+        _homeInventoryStatus.Text = rows.Count == 0
+            ? $"Chưa có dữ liệu kho trong khoảng {ShortDate(report.From)} - {ShortDate(report.To)}."
+            : $"Khoảng {ShortDate(report.From)} - {ShortDate(report.To)} • {latestRows.Count:N0} mặt hàng có tồn.";
     }
 
     private void RenderInventory(InventoryReportResponse report)
@@ -1499,6 +1675,9 @@ public sealed class DashboardPage : ContentPage
 
     private static string ShortDate(string date)
         => DateTime.TryParse(date, out var value) ? value.ToString("dd/MM") : date;
+
+    private static DateTime ParseReportDate(string date)
+        => DateTime.TryParse(date, out var value) ? value.Date : DateTime.MinValue;
 
     private static string FormatQty(decimal value)
         => value % 1 == 0
