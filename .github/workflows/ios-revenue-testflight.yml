@@ -140,6 +140,7 @@ jobs:
             -p:RuntimeIdentifier=ios-arm64 \
             -p:ArchiveOnBuild=true \
             -p:BuildIpa=true \
+            -p:ApplicationVersion="${GITHUB_RUN_NUMBER}" \
             -p:CodesignKey="${IOS_CODESIGN_KEY}" \
             -p:CodesignProvision="${IOS_CODESIGN_PROVISION}"
 
