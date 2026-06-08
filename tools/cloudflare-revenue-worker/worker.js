@@ -26,6 +26,14 @@ export default {
         requireAdmin(request, env);
         return json(await provision(env, await readJson(request)));
       }
+      if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/sync-key") {
+        requireAdmin(request, env);
+        return json(await getActiveSyncKey(env, await readJson(request)));
+      }
+      if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/lookup-config") {
+        requireAdmin(request, env);
+        return json(await lookupRevenueCloudConfig(env, await readJson(request)));
+      }
       if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/manager-user") {
         requireAdmin(request, env);
         return json(await upsertManagerUser(env, await readJson(request)));
@@ -37,6 +45,10 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/unrevoke") {
         requireAdmin(request, env);
         return json(await setRevenueCloudEnabled(env, await readJson(request), true));
+      }
+      if (request.method === "POST" && url.pathname === "/admin/revenue-cloud/delete-data") {
+        requireAdmin(request, env);
+        return json(await deleteRevenueCloudData(env, await readJson(request)));
       }
 
       if (request.method === "POST" && url.pathname === "/sync/heartbeat") {
@@ -53,6 +65,11 @@ export default {
       if (request.method === "POST" && url.pathname === "/sync/open-tables/batch") {
         const { ctx, body } = await readSignedJson(request, env);
         return json(await syncOpenTables(env, ctx, Array.isArray(body.tables) ? body.tables : []));
+      }
+
+      if (request.method === "POST" && url.pathname === "/sync/inventory-daily") {
+        const { ctx, body } = await readSignedJson(request, env);
+        return json(await syncInventoryDaily(env, ctx, body));
       }
 
       const syncOne = url.pathname.match(/^\/sync\/invoices\/([^/]+)$/);
@@ -115,6 +132,12 @@ export default {
         return json(await reportOpenTables(env, store));
       }
 
+      if (request.method === "GET" && url.pathname === "/reports/inventory") {
+        const s = await manager(request, env);
+        const store = await reportStore(env, s.tenant_id, url.searchParams.get("storeId"));
+        return json(await reportInventory(env, store, url.searchParams));
+      }
+
       if (request.method === "GET" && url.pathname === "/invoices") {
         const s = await manager(request, env);
         const store = await reportStore(env, s.tenant_id, url.searchParams.get("storeId"));
@@ -153,6 +176,127 @@ async function provision(env, b) {
   return { ok: true, tenantId, storeId, keyId, syncKey };
 }
 
+async function getActiveSyncKey(env, b) {
+  const tenantId = text(b.tenantId);
+  const storeId = text(b.storeId || "MAIN");
+  if (!tenantId || !storeId) bad("invalid_tenant_store");
+  const store = await getStore(env, tenantId, storeId);
+  if (!store) notFound("store_not_found");
+  const key = await env.DB.prepare("SELECT key_id,sync_key,created_at FROM store_sync_keys WHERE tenant_id=? AND store_id=? AND is_active=1 ORDER BY created_at DESC LIMIT 1")
+    .bind(tenantId, storeId).first();
+  if (!key?.sync_key) notFound("sync_key_not_found");
+  await audit(env, tenantId, storeId, "admin", "read_sync_key", "Active Revenue Cloud sync key retrieved by KeyGen.");
+  return {
+    ok: true,
+    tenantId,
+    storeId,
+    keyId: key.key_id || "",
+    syncKey: key.sync_key,
+    revenueCloudEnabled: store.revenue_cloud_enabled === 1,
+    timezone: store.timezone || "Asia/Ho_Chi_Minh",
+    createdAt: key.created_at || null
+  };
+}
+
+async function lookupRevenueCloudConfig(env, b) {
+  const licenseId = id(b.licenseId || b.LicenseId || b.tenantId || b.TenantId);
+  const tenantId = id(b.tenantId || b.TenantId || licenseId);
+  const storeId = id(b.storeId || b.StoreId || "MAIN");
+  const customerName = text(b.customerName || b.CustomerName);
+  const phone = digits(b.phone || b.Phone);
+  const candidates = new Map();
+
+  const add = row => {
+    if (!row?.sync_key) return;
+    candidates.set(`${row.tenant_id}|${row.store_id}`, row);
+  };
+
+  if (tenantId && storeId) {
+    add(await readActiveSyncKeyRow(env, tenantId, storeId));
+  }
+
+  if (licenseId) {
+    const rows = await env.DB.prepare(`SELECT s.tenant_id,s.store_id,s.name AS store_name,s.timezone,s.revenue_cloud_enabled,t.name AS tenant_name,k.key_id,k.sync_key,k.created_at
+      FROM stores s
+      JOIN tenants t ON t.tenant_id=s.tenant_id
+      JOIN store_sync_keys k ON k.tenant_id=s.tenant_id AND k.store_id=s.store_id AND k.is_active=1
+      WHERE s.tenant_id=?
+      ORDER BY CASE WHEN s.store_id='MAIN' THEN 0 ELSE 1 END,s.store_id,k.created_at DESC`)
+      .bind(licenseId).all();
+    for (const row of rows.results || []) add(row);
+  }
+
+  if (phone) {
+    const rows = await env.DB.prepare(`SELECT s.tenant_id,s.store_id,s.name AS store_name,s.timezone,s.revenue_cloud_enabled,t.name AS tenant_name,k.key_id,k.sync_key,k.created_at
+      FROM manager_users u
+      JOIN stores s ON s.tenant_id=u.tenant_id
+      JOIN tenants t ON t.tenant_id=s.tenant_id
+      JOIN store_sync_keys k ON k.tenant_id=s.tenant_id AND k.store_id=s.store_id AND k.is_active=1
+      WHERE u.username=? AND u.is_active=1
+      ORDER BY CASE WHEN s.store_id='MAIN' THEN 0 ELSE 1 END,s.store_id,k.created_at DESC`)
+      .bind(phone).all();
+    for (const row of rows.results || []) add(row);
+  }
+
+  if (customerName) {
+    const likeName = `%${customerName}%`;
+    const rows = await env.DB.prepare(`SELECT s.tenant_id,s.store_id,s.name AS store_name,s.timezone,s.revenue_cloud_enabled,t.name AS tenant_name,k.key_id,k.sync_key,k.created_at
+      FROM stores s
+      JOIN tenants t ON t.tenant_id=s.tenant_id
+      JOIN store_sync_keys k ON k.tenant_id=s.tenant_id AND k.store_id=s.store_id AND k.is_active=1
+      WHERE lower(t.name)=lower(?) OR lower(s.name)=lower(?) OR lower(t.name) LIKE lower(?) OR lower(s.name) LIKE lower(?)
+      ORDER BY CASE WHEN s.store_id='MAIN' THEN 0 ELSE 1 END,s.store_id,k.created_at DESC`)
+      .bind(customerName, customerName, likeName, likeName).all();
+    for (const row of rows.results || []) add(row);
+  }
+
+  const matches = [...candidates.values()];
+  if (matches.length === 0) notFound("revenue_cloud_config_not_found");
+
+  const preferred = matches.find(row => row.tenant_id === licenseId && row.store_id === "MAIN")
+    || matches.find(row => row.store_id === "MAIN");
+  const selected = preferred || (matches.length === 1 ? matches[0] : null);
+  if (!selected) {
+    conflict("ambiguous_revenue_cloud_config", {
+      candidates: matches.map(row => ({
+        tenantId: row.tenant_id,
+        storeId: row.store_id,
+        tenantName: row.tenant_name || "",
+        storeName: row.store_name || ""
+      }))
+    });
+  }
+
+  await audit(env, selected.tenant_id, selected.store_id, "admin", "lookup_sync_key", "Revenue Cloud sync config looked up by KeyGen.");
+  return toSyncConfigResult(selected);
+}
+
+async function readActiveSyncKeyRow(env, tenantId, storeId) {
+  return await env.DB.prepare(`SELECT s.tenant_id,s.store_id,s.name AS store_name,s.timezone,s.revenue_cloud_enabled,t.name AS tenant_name,k.key_id,k.sync_key,k.created_at
+    FROM stores s
+    JOIN tenants t ON t.tenant_id=s.tenant_id
+    JOIN store_sync_keys k ON k.tenant_id=s.tenant_id AND k.store_id=s.store_id AND k.is_active=1
+    WHERE s.tenant_id=? AND s.store_id=?
+    ORDER BY k.created_at DESC
+    LIMIT 1`)
+    .bind(tenantId, storeId).first();
+}
+
+function toSyncConfigResult(row) {
+  return {
+    ok: true,
+    tenantId: row.tenant_id,
+    storeId: row.store_id,
+    keyId: row.key_id || "",
+    syncKey: row.sync_key,
+    revenueCloudEnabled: row.revenue_cloud_enabled === 1,
+    timezone: row.timezone || "Asia/Ho_Chi_Minh",
+    tenantName: row.tenant_name || "",
+    storeName: row.store_name || "",
+    createdAt: row.created_at || null
+  };
+}
+
 async function setRevenueCloudEnabled(env, b, enabled) {
   const tenantId = text(b.tenantId), storeId = text(b.storeId);
   if (!tenantId || !storeId) bad("invalid_tenant_store");
@@ -166,6 +310,42 @@ async function setRevenueCloudEnabled(env, b, enabled) {
   ]);
   await audit(env, tenantId, storeId, "admin", enabled ? "unrevoke_revenue_cloud" : "revoke_revenue_cloud", enabled ? "Revenue Cloud enabled." : "Revenue Cloud revoked.");
   return { ok: true, tenantId, storeId, revenueCloudEnabled: enabled };
+}
+
+async function deleteRevenueCloudData(env, b) {
+  const tenantId = text(b.tenantId);
+  const storeId = text(b.storeId);
+  const confirm = text(b.confirm);
+  if (!tenantId || !storeId) bad("invalid_tenant_store");
+  if (confirm !== "DELETE_REVENUE_CLOUD_DATA") bad("confirmation_required");
+
+  const store = await getStore(env, tenantId, storeId);
+  if (!store) notFound("store_not_found");
+
+  const counts = {};
+  counts.invoicePaymentLines = await deleteRows(env.DB.prepare("DELETE FROM invoice_payment_lines WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.invoiceItems = await deleteRows(env.DB.prepare("DELETE FROM invoice_items WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.invoices = await deleteRows(env.DB.prepare("DELETE FROM invoices WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.openTableItems = await deleteRows(env.DB.prepare("DELETE FROM open_table_items WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.openTables = await deleteRows(env.DB.prepare("DELETE FROM open_tables WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.inventoryDailyStock = await deleteRows(env.DB.prepare("DELETE FROM inventory_daily_stock WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.dailyRevenueSnapshots = await deleteRows(env.DB.prepare("DELETE FROM daily_revenue_snapshots WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.syncNonces = await deleteRows(env.DB.prepare("DELETE FROM sync_nonces WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+  counts.syncLogs = await deleteRows(env.DB.prepare("DELETE FROM sync_logs WHERE tenant_id=? AND store_id=?").bind(tenantId, storeId));
+
+  const deletedAt = now();
+  await env.DB.prepare("UPDATE stores SET last_sync_at=NULL,last_error=NULL,updated_at=? WHERE tenant_id=? AND store_id=?")
+    .bind(deletedAt, tenantId, storeId)
+    .run();
+
+  const totalDeleted = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  await audit(env, tenantId, storeId, "admin", "delete_revenue_cloud_data", `Revenue Cloud report data deleted. rows=${totalDeleted}`);
+  return { ok: true, tenantId, storeId, deletedAt, counts, totalDeleted };
+}
+
+async function deleteRows(statement) {
+  const result = await statement.run();
+  return Number(result?.meta?.changes || result?.changes || 0);
 }
 
 async function upsertManagerUser(env, b) {
@@ -287,6 +467,60 @@ async function syncOpenTables(env, ctx, tables) {
     .bind(syncAt, failed ? `Failed ${failed} open table(s).` : null, syncAt, ctx.tenantId, ctx.storeId).run();
   await logSync(env, ctx.tenantId, ctx.storeId, "open_tables_batch", `accepted=${accepted};failed=${failed}`, "");
   return { ok: failed === 0, accepted, failed, errors, syncedAt: syncAt };
+}
+
+async function syncInventoryDaily(env, ctx, body) {
+  if (!body || typeof body !== "object") bad("invalid_inventory_payload");
+  const businessDate = dateOnly(body.businessDate);
+  if (!businessDate) bad("invalid_business_date");
+  const rows = Array.isArray(body.items) ? body.items : [];
+  const syncAt = now();
+  let accepted = 0, failed = 0;
+  const errors = [];
+
+  for (const raw of rows) {
+    try {
+      const x = normInventoryItem(raw);
+      await env.DB.prepare(`INSERT INTO inventory_daily_stock (tenant_id,store_id,business_date,product_id,product_name,unit_name,opening_qty,import_qty,last_import_price,manual_export_qty,sold_qty,total_export_qty,closing_qty,min_stock,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(tenant_id,store_id,business_date,product_id) DO UPDATE SET product_name=excluded.product_name,unit_name=excluded.unit_name,opening_qty=excluded.opening_qty,import_qty=excluded.import_qty,last_import_price=excluded.last_import_price,manual_export_qty=excluded.manual_export_qty,sold_qty=excluded.sold_qty,total_export_qty=excluded.total_export_qty,closing_qty=excluded.closing_qty,min_stock=excluded.min_stock,updated_at=excluded.updated_at`)
+        .bind(ctx.tenantId, ctx.storeId, businessDate, x.productId, x.productName, x.unitName, x.openingQty, x.importQty, x.lastImportPrice, x.manualExportQty, x.soldQty, x.totalExportQty, x.closingQty, x.minStock, syncAt)
+        .run();
+      accepted++;
+    } catch (e) {
+      failed++;
+      errors.push({ productId: text(raw?.productId), error: String(e?.message || e) });
+    }
+  }
+
+  await env.DB.prepare("UPDATE stores SET last_sync_at=?,last_error=?,updated_at=? WHERE tenant_id=? AND store_id=?")
+    .bind(syncAt, failed ? `Failed ${failed} inventory item(s).` : null, syncAt, ctx.tenantId, ctx.storeId).run();
+  await logSync(env, ctx.tenantId, ctx.storeId, "inventory_daily", `businessDate=${businessDate};accepted=${accepted};failed=${failed}`, "");
+  return { ok: failed === 0, businessDate, accepted, failed, errors, syncedAt: syncAt };
+}
+
+function normInventoryItem(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("invalid_inventory_item");
+  const productId = text(raw.productId);
+  if (!productId) throw new Error("missing_product_id");
+  const manualExportQty = qty(raw.manualExportQty);
+  const soldQty = qty(raw.soldQty);
+  const totalExportQty = raw.totalExportQty === undefined || raw.totalExportQty === null
+    ? manualExportQty + soldQty
+    : qty(raw.totalExportQty);
+  return {
+    productId,
+    productName: text(raw.productName) || productId,
+    unitName: text(raw.unitName),
+    openingQty: qty(raw.openingQty, true),
+    importQty: qty(raw.importQty),
+    lastImportPrice: money(raw.lastImportPrice),
+    manualExportQty,
+    soldQty,
+    totalExportQty,
+    closingQty: qty(raw.closingQty, true),
+    minStock: qty(raw.minStock)
+  };
 }
 
 async function upsertInvoice(env, ctx, raw, dates) {
@@ -427,6 +661,67 @@ async function payBreakArray(env, store, from, to) { const p = await payBreak(en
 async function topProducts(env, store, from, to, limit) {
   const r = await env.DB.prepare("SELECT it.product_id,it.product_name,it.product_type,COALESCE(SUM(it.quantity),0) quantity,COALESCE(SUM(it.line_total),0) revenue FROM invoice_items it JOIN invoices i ON i.tenant_id=it.tenant_id AND i.store_id=it.store_id AND i.invoice_id=it.invoice_id WHERE i.tenant_id=? AND i.store_id=? AND i.business_date>=? AND i.business_date<=? AND i.status IN ('paid','edited') GROUP BY it.product_id,it.product_name,it.product_type ORDER BY quantity DESC,revenue DESC LIMIT ?").bind(store.tenant_id, store.store_id, from, to, limit).all();
   return { from, to, items: (r.results || []).map(x => ({ productId: x.product_id || "", productName: x.product_name || "", productType: prodType(x.product_type), quantity: Number(x.quantity || 0), revenue: Number(x.revenue || 0) })) };
+}
+async function reportInventory(env, store, q) {
+  const range = inventoryRange(store, q);
+  const dayCount = daysBetween(range.from, range.to) + 1;
+  const dayRow = await env.DB.prepare("SELECT COUNT(DISTINCT business_date) snapshot_days,MAX(updated_at) updated_at FROM inventory_daily_stock WHERE tenant_id=? AND store_id=? AND business_date>=? AND business_date<=?")
+    .bind(store.tenant_id, store.store_id, range.from, range.to).first();
+  const snapshotDays = Number(dayRow?.snapshot_days || 0);
+  const r = await env.DB.prepare(`SELECT
+      s.product_id,
+      (SELECT x.product_name FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date>=? AND x.business_date<=? ORDER BY x.business_date DESC LIMIT 1) product_name,
+      (SELECT x.unit_name FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date>=? AND x.business_date<=? ORDER BY x.business_date DESC LIMIT 1) unit_name,
+      (SELECT x.opening_qty FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date>=? AND x.business_date<=? ORDER BY x.business_date ASC LIMIT 1) opening_qty,
+      COALESCE(SUM(s.import_qty),0) import_qty,
+      COALESCE((SELECT x.last_import_price FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date<=? AND x.last_import_price>0 ORDER BY x.business_date DESC LIMIT 1),MAX(s.last_import_price),0) last_import_price,
+      COALESCE(SUM(s.manual_export_qty),0) manual_export_qty,
+      COALESCE(SUM(s.sold_qty),0) sold_qty,
+      COALESCE(SUM(s.total_export_qty),0) total_export_qty,
+      (SELECT x.closing_qty FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date>=? AND x.business_date<=? ORDER BY x.business_date DESC LIMIT 1) closing_qty,
+      COALESCE((SELECT x.min_stock FROM inventory_daily_stock x WHERE x.tenant_id=s.tenant_id AND x.store_id=s.store_id AND x.product_id=s.product_id AND x.business_date>=? AND x.business_date<=? ORDER BY x.business_date DESC LIMIT 1),MAX(s.min_stock),0) min_stock
+    FROM inventory_daily_stock s
+    WHERE s.tenant_id=? AND s.store_id=? AND s.business_date>=? AND s.business_date<=?
+    GROUP BY s.tenant_id,s.store_id,s.product_id
+    ORDER BY product_name,s.product_id`)
+    .bind(range.from, range.to, range.from, range.to, range.from, range.to, range.to, range.from, range.to, range.from, range.to, store.tenant_id, store.store_id, range.from, range.to)
+    .all();
+  const items = (r.results || []).map(x => {
+    const closingQty = Number(x.closing_qty || 0);
+    const minStock = Number(x.min_stock || 0);
+    return {
+      productId: x.product_id || "",
+      productName: x.product_name || x.product_id || "",
+      unitName: x.unit_name || "",
+      openingQty: Number(x.opening_qty || 0),
+      importQty: Number(x.import_qty || 0),
+      lastImportPrice: Number(x.last_import_price || 0),
+      manualExportQty: Number(x.manual_export_qty || 0),
+      soldQty: Number(x.sold_qty || 0),
+      totalExportQty: Number(x.total_export_qty || 0),
+      closingQty,
+      minStock,
+      isLowStock: minStock > 0 && closingQty <= minStock
+    };
+  });
+  return {
+    storeId: store.store_id,
+    period: range.period,
+    from: range.from,
+    to: range.to,
+    lastSyncAt: dayRow?.updated_at || store.last_sync_at || null,
+    missingInventorySnapshot: snapshotDays < dayCount,
+    snapshotDays,
+    expectedSnapshotDays: dayCount,
+    summary: {
+      productCount: items.length,
+      lowStockCount: items.filter(x => x.isLowStock).length,
+      totalImportQty: items.reduce((sum, x) => sum + x.importQty, 0),
+      totalSoldQty: items.reduce((sum, x) => sum + x.soldQty, 0),
+      totalManualExportQty: items.reduce((sum, x) => sum + x.manualExportQty, 0)
+    },
+    items
+  };
 }
 async function invoiceList(env, store, q) {
   const wh = ["tenant_id=?", "store_id=?"], p = [store.tenant_id, store.store_id]; const from = dateOnly(q.get("from")), to = dateOnly(q.get("to")), st = invStatus(q.get("status"), true);
@@ -569,8 +864,10 @@ function privacyPolicy() {
 function bad(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 400, headers: H }); }
 function unauth(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 401, headers: H }); }
 function notFound(error) { throw new Response(JSON.stringify({ error, message: error }), { status: 404, headers: H }); }
+function conflict(error, extra = {}) { throw new Response(JSON.stringify({ error, message: error, ...extra }), { status: 409, headers: H }); }
 function text(v) { return String(v || "").trim(); }
 function id(v) { return text(v).toUpperCase(); }
+function digits(v) { return text(v).replace(/\D/g, ""); }
 function invStatus(v, all = false) { const t = text(v).toLowerCase(); if (all && (!t || t === "all")) return ""; return ["paid", "edited", "cancelled"].includes(t) ? t : ""; }
 function payMethod(v) { const t = text(v).toLowerCase(); if (PAY_METHODS.has(t)) return t; if (t === "1") return "cash"; if (t === "2") return "card"; if (t === "3") return "transfer"; return "other"; }
 function invMethod(v, p) { if (p.length >= 2) return "split"; const t = text(v).toLowerCase(); if (INV_METHODS.has(t)) return t; return p.length === 1 ? p[0].method : payMethod(t); }
@@ -581,9 +878,50 @@ function reqDate(v, n) { const d = dateOnly(v); if (!d) bad(`invalid_${n}`); ret
 function reqMonth(v) { const t = text(v); if (!/^\d{4}-\d{2}$/.test(t)) bad("invalid_month"); return t; }
 function dateFrom(v) { return v ? dateOnly(String(v).slice(0, 10)) : ""; }
 function utcDate(d) { return d.toISOString().slice(0, 10); }
+function localDate(timezone, offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: text(timezone) || "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(d);
+  const get = type => parts.find(x => x.type === type)?.value || "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
 function addDays(d, n) { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return utcDate(x); }
 function nextMonth(m) { const x = new Date(`${m}-01T00:00:00Z`); x.setUTCMonth(x.getUTCMonth() + 1); return utcDate(x); }
+function inventoryRange(store, q) {
+  const period = text(q.get("period") || "today").toLowerCase();
+  const today = localDate(store.timezone || "Asia/Ho_Chi_Minh");
+  let from = "", to = "";
+  if (period === "custom") {
+    from = reqDate(q.get("from"), "from");
+    to = reqDate(q.get("to"), "to");
+  } else if (period === "yesterday") {
+    from = to = addDays(today, -1);
+  } else if (period === "last7") {
+    from = addDays(today, -6);
+    to = today;
+  } else if (period === "thismonth") {
+    from = `${today.slice(0, 7)}-01`;
+    to = today;
+  } else if (period === "lastmonth") {
+    const firstThisMonth = `${today.slice(0, 7)}-01`;
+    const lastMonthDay = addDays(firstThisMonth, -1);
+    from = `${lastMonthDay.slice(0, 7)}-01`;
+    to = lastMonthDay;
+  } else if (!period || period === "today") {
+    from = to = today;
+  } else {
+    bad("invalid_inventory_period");
+  }
+  if (from > to) bad("invalid_date_range");
+  return { period: period || "today", from, to };
+}
+function daysBetween(from, to) { return Math.max(0, Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000)); }
 function money(v) { const n = Number(v || 0); return Number.isFinite(n) ? Math.round(Math.max(0, n)) : 0; }
+function qty(v, allowNegative = false) { const n = Number(v || 0); if (!Number.isFinite(n)) return 0; return allowNegative ? n : Math.max(0, n); }
 function clamp(v, min, max, fb) { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.trunc(n))) : fb; }
 function now() { return new Date().toISOString(); }
 
@@ -593,6 +931,8 @@ export const __test = {
   reportMonth,
   topProducts,
   reportOpenTables,
+  reportInventory,
+  syncInventoryDaily,
   invoiceList,
   invoiceDetail
 };

@@ -100,6 +100,9 @@ public sealed class RevenueApiClient
     public Task<TopProductsResponse> TopProductsAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
         => GetCachedAsync<TopProductsResponse>($"/reports/top-products?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&limit=5", $"top_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
+    public Task<InventoryReportResponse> InventoryAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
+        => GetCachedAsync<InventoryReportResponse>($"/reports/inventory?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", $"inventory_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
+
     public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {
         var safePage = Math.Max(1, page);
@@ -121,7 +124,7 @@ public sealed class RevenueApiClient
             await _cache.SaveInvoiceDetailAsync(_session.TenantId, storeId, _session.Username, invoiceId, value);
             return value;
         }
-        catch when (Connectivity.Current.NetworkAccess != NetworkAccess.Internet)
+        catch (Exception ex) when (ShouldUseCacheFallback(ex, cancellationToken))
         {
             var cached = await _cache.LoadInvoiceDetailAsync(_session.TenantId, storeId, _session.Username, invoiceId);
             if (cached is not null)
@@ -130,7 +133,7 @@ public sealed class RevenueApiClient
                 return cached.Value;
             }
 
-            throw new InvalidOperationException("Không có mạng và chưa có chi tiết hóa đơn trong cache.");
+            throw new InvalidOperationException(FriendlyNetworkError("Không có chi tiết hóa đơn trong cache."));
         }
     }
 
@@ -142,7 +145,7 @@ public sealed class RevenueApiClient
             await _cache.SaveAsync(_session.TenantId, _session.StoreId, _session.Username, cacheKey, value);
             return value;
         }
-        catch when (Connectivity.Current.NetworkAccess != NetworkAccess.Internet)
+        catch (Exception ex) when (ShouldUseCacheFallback(ex, cancellationToken))
         {
             var cached = await _cache.LoadAsync<T>(_session.TenantId, _session.StoreId, _session.Username, cacheKey);
             if (cached is not null)
@@ -151,7 +154,7 @@ public sealed class RevenueApiClient
                 return cached.Value;
             }
 
-            throw new InvalidOperationException("Không có mạng và chưa có dữ liệu cache.");
+            throw new InvalidOperationException(FriendlyNetworkError("Chưa có dữ liệu cache."));
         }
     }
 
@@ -264,6 +267,22 @@ public sealed class RevenueApiClient
         return string.IsNullOrWhiteSpace(body) ? $"HTTP {(int)statusCode}" : body;
     }
 
+    private static bool ShouldUseCacheFallback(Exception ex, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return Connectivity.Current.NetworkAccess != NetworkAccess.Internet ||
+               ex is HttpRequestException ||
+               ex is TaskCanceledException ||
+               ex is TimeoutException;
+    }
+
+    private static string FriendlyNetworkError(string suffix)
+        => $"Không kết nối được Revenue Cloud. {suffix}";
+
     public static string Money(decimal value)
         => string.Format(CultureInfo.GetCultureInfo("vi-VN"), "{0:N0}đ", value).Replace(",", ".");
 }
@@ -280,6 +299,21 @@ public sealed record DailyPoint(string Date, decimal Revenue, int InvoiceCount);
 public sealed record PaymentSlice(string Method, decimal Amount);
 public sealed record TopProductsResponse(string From, string To, List<TopProductDto> Items);
 public sealed record TopProductDto(string ProductId, string ProductName, string ProductType, decimal Quantity, decimal Revenue);
+public sealed record InventoryReportResponse(string StoreId, string From, string To, int TotalItems, List<InventoryReportItem> Items);
+public sealed record InventoryReportItem(
+    string BusinessDate,
+    string ProductId,
+    string ProductName,
+    string UnitName,
+    decimal OpeningQty,
+    decimal ImportQty,
+    decimal LastImportPrice,
+    decimal ManualExportQty,
+    decimal SoldQty,
+    decimal TotalExportQty,
+    decimal ClosingQty,
+    decimal MinStock,
+    DateTimeOffset? UpdatedAt);
 public sealed record OpenTablesReport(string StoreId, DateTimeOffset? LastSyncAt, int TableCount, decimal EstimatedTotal, List<OpenTableDto> Tables);
 public sealed record OpenTableDto(string TableId, string TableName, string ZoneId, string ZoneName, string OrderId, DateTimeOffset? OccupiedAt, decimal Total, DateTimeOffset? ModifiedAt, DateTimeOffset? SyncedAt, List<OpenTableItemDto>? Items);
 public sealed record OpenTableItemDto(string LineId, string ProductId, string ProductName, string ProductType, string UnitName, decimal Quantity, decimal UnitPrice, decimal LineTotal, string Note);

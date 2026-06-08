@@ -66,6 +66,23 @@ test("GET /reports/open-tables response matches contract", async () => {
     ["lineId", "productId", "productName", "productType", "unitName", "quantity", "unitPrice", "lineTotal", "note"].sort());
 });
 
+test("GET /reports/inventory response matches contract", async () => {
+  const response = await __test.reportInventory(mockEnv(), store, new URLSearchParams("period=today"));
+
+  assert.equal(response.storeId, "STORE-001");
+  assert.equal(response.period, "today");
+  assert.equal(typeof response.missingInventorySnapshot, "boolean");
+  assert.equal(typeof response.snapshotDays, "number");
+  assert.equal(typeof response.expectedSnapshotDays, "number");
+  assert.deepEqual(
+    Object.keys(response.summary).sort(),
+    ["productCount", "lowStockCount", "totalImportQty", "totalSoldQty", "totalManualExportQty"].sort());
+  assert.ok(Array.isArray(response.items));
+  assert.deepEqual(
+    Object.keys(response.items[0]).sort(),
+    ["productId", "productName", "unitName", "openingQty", "importQty", "lastImportPrice", "manualExportQty", "soldQty", "totalExportQty", "closingQty", "minStock", "isLowStock"].sort());
+});
+
 test("GET /invoices list response matches contract", async () => {
   const response = await __test.invoiceList(mockEnv(), store, new URLSearchParams("from=2026-05-01&to=2026-05-20&page=1&pageSize=50"));
 
@@ -122,6 +139,71 @@ test("sync HMAC validates exact UTF-8 body bytes and logs failed canonical field
   assert.ok(env.DB.syncLogs.some(x => x.requestTimestamp === timestamp && x.requestNonce === badNonce && /^[0-9a-f]{64}$/.test(x.bodySha256)));
 });
 
+test("sync inventory-daily upserts stock snapshot rows", async () => {
+  const env = mockEnv();
+  const response = await __test.syncInventoryDaily(env, { tenantId: "TENANT-001", storeId: "STORE-001" }, {
+    businessDate: "2026-06-08",
+    items: [
+      {
+        productId: "BIA-HENIKEN",
+        productName: "BIA HENIKEN LON",
+        unitName: "Lon",
+        openingQty: 100,
+        importQty: 0,
+        lastImportPrice: 18000,
+        manualExportQty: 0,
+        soldQty: 20,
+        closingQty: 80,
+        minStock: 5
+      }
+    ]
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.businessDate, "2026-06-08");
+  assert.equal(response.accepted, 1);
+  assert.equal(response.failed, 0);
+  assert.equal(env.DB.inventoryRows.length, 1);
+  assert.equal(env.DB.inventoryRows[0].productId, "BIA-HENIKEN");
+  assert.equal(env.DB.inventoryRows[0].soldQty, 20);
+  assert.equal(env.DB.inventoryRows[0].totalExportQty, 20);
+});
+
+test("admin delete-data clears report data for a tenant store", async () => {
+  const env = { ...mockEnv(), ADMIN_SECRET: "admin-secret" };
+  const response = await worker.fetch(new Request("https://worker.test/admin/revenue-cloud/delete-data", {
+    method: "POST",
+    headers: {
+      "authorization": "Bearer admin-secret",
+      "content-type": "application/json; charset=utf-8"
+    },
+    body: JSON.stringify({
+      tenantId: "TENANT-001",
+      storeId: "STORE-001",
+      confirm: "DELETE_REVENUE_CLOUD_DATA"
+    })
+  }), env);
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.tenantId, "TENANT-001");
+  assert.equal(body.storeId, "STORE-001");
+  assert.equal(body.totalDeleted, 9);
+  assert.deepEqual(env.DB.deletedTables, [
+    "invoice_payment_lines",
+    "invoice_items",
+    "invoices",
+    "open_table_items",
+    "open_tables",
+    "inventory_daily_stock",
+    "daily_revenue_snapshots",
+    "sync_nonces",
+    "sync_logs"
+  ]);
+  assert.equal(env.DB.auditLogs.at(-1)?.action, "delete_revenue_cloud_data");
+});
+
 function assertSummary(summary) {
   assert.deepEqual(
     Object.keys(summary).sort(),
@@ -176,6 +258,9 @@ class MockD1 {
     this.syncKey = options.syncKey || "SYNC-KEY";
     this.nonces = new Set();
     this.syncLogs = [];
+    this.auditLogs = [];
+    this.deletedTables = [];
+    this.inventoryRows = [];
   }
 
   prepare(sql) {
@@ -207,6 +292,10 @@ class MockStatement {
 
     if (sql.includes("select count(*) count from invoices")) {
       return { count: 1 };
+    }
+
+    if (sql.includes("count(distinct business_date)") && sql.includes("from inventory_daily_stock")) {
+      return { snapshot_days: 1, updated_at: "2026-06-08T10:00:00+07:00" };
     }
 
     if (sql.includes("select * from invoices")) {
@@ -316,6 +405,26 @@ class MockStatement {
       };
     }
 
+    if (sql.includes("from inventory_daily_stock s")) {
+      return {
+        results: [
+          {
+            product_id: "BIA-HENIKEN",
+            product_name: "BIA HENIKEN LON",
+            unit_name: "Lon",
+            opening_qty: 100,
+            import_qty: 0,
+            last_import_price: 18000,
+            manual_export_qty: 0,
+            sold_qty: 20,
+            total_export_qty: 20,
+            closing_qty: 80,
+            min_stock: 5
+          }
+        ]
+      };
+    }
+
     throw new Error(`Unhandled all SQL: ${this.sql}`);
   }
 
@@ -339,7 +448,45 @@ class MockStatement {
       return { success: true };
     }
 
-    if (sql.includes("update stores") || sql.includes("delete from sync_nonces")) {
+    if (sql.includes("insert into inventory_daily_stock")) {
+      this.db.inventoryRows.push({
+        tenantId: this.params[0],
+        storeId: this.params[1],
+        businessDate: this.params[2],
+        productId: this.params[3],
+        productName: this.params[4],
+        unitName: this.params[5],
+        openingQty: this.params[6],
+        importQty: this.params[7],
+        lastImportPrice: this.params[8],
+        manualExportQty: this.params[9],
+        soldQty: this.params[10],
+        totalExportQty: this.params[11],
+        closingQty: this.params[12],
+        minStock: this.params[13],
+        updatedAt: this.params[14]
+      });
+      return { success: true };
+    }
+
+    if (sql.includes("insert into audit_logs")) {
+      this.db.auditLogs.push({
+        tenantId: this.params[1],
+        storeId: this.params[2],
+        actorType: this.params[3],
+        action: this.params[4],
+        message: this.params[5]
+      });
+      return { success: true };
+    }
+
+    if (sql.startsWith("delete from ")) {
+      const table = sql.match(/^delete from ([a-z_]+)/)?.[1] || "";
+      this.db.deletedTables.push(table);
+      return { success: true, meta: { changes: 1 } };
+    }
+
+    if (sql.includes("update stores")) {
       return { success: true };
     }
 

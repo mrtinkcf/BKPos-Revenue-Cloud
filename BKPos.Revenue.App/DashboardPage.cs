@@ -23,6 +23,9 @@ public sealed class DashboardPage : ContentPage
     private readonly MauiDatePicker _invoiceFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiDatePicker _invoiceToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly MauiPicker _invoicePresetPicker = new() { Title = "Lọc hóa đơn", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _inventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _inventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiPicker _inventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
     private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
     private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
     private readonly Label _todayBadge = new() { TextColor = AppColors.Blue, FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold };
@@ -36,6 +39,8 @@ public sealed class DashboardPage : ContentPage
     private readonly VerticalStackLayout _paymentPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _dailyPanel = new() { Spacing = 8 };
     private readonly VerticalStackLayout _topPanel = new() { Spacing = 8 };
+    private readonly VerticalStackLayout _inventoryPanel = new() { Spacing = 8 };
+    private readonly Label _inventorySummary = new() { FontSize = AppUi.S(12), TextColor = AppColors.Muted, LineBreakMode = LineBreakMode.WordWrap };
     private readonly VerticalStackLayout _invoicePanel = new() { Spacing = 8 };
     private readonly Label _invoicePageInfo = new() { TextColor = AppColors.Muted, FontSize = AppUi.S(12) };
     private readonly RevenueLineDrawable _lineDrawable = new();
@@ -80,12 +85,23 @@ public sealed class DashboardPage : ContentPage
         HeightRequest = AppUi.S(40),
         FontSize = AppUi.S(12)
     };
+    private readonly Button _inventoryFilterButton = new()
+    {
+        Text = "Xem kho hàng",
+        BackgroundColor = AppColors.Blue,
+        TextColor = Colors.White,
+        CornerRadius = 12,
+        HeightRequest = AppUi.S(44),
+        FontSize = AppUi.S(13),
+        FontAttributes = FontAttributes.Bold
+    };
     private readonly List<RefreshView> _refreshViews = [];
     private readonly IDispatcherTimer? _autoRefreshTimer;
     private const int InvoicePageSize = 20;
     private bool _loading;
     private bool _updatingRangePreset;
     private bool _updatingInvoicePreset;
+    private bool _updatingInventoryPreset;
     private int _invoicePage = 1;
     private List<StoreDto> _stores = [];
     private string _storeTimezone = "Asia/Ho_Chi_Minh";
@@ -114,7 +130,7 @@ public sealed class DashboardPage : ContentPage
     };
 
     // ── tab navigation ────────────────────────────────────────────────────
-    private enum Tab { Home, Tables, Invoices, TopProducts }
+    private enum Tab { Home, Tables, Invoices, Inventory }
     private Tab _activeTab = Tab.Home;
     private readonly bool[] _loadedTabs = new bool[4];
     private DateTimeOffset _lastSwipeAt = DateTimeOffset.MinValue;
@@ -129,8 +145,8 @@ public sealed class DashboardPage : ContentPage
     private readonly Label _tableEstimatedLabel = ValueLabel(AppUi.S(22), AppColors.Blue);
     private readonly VerticalStackLayout _tablesPanel = new() { Spacing = AppUi.S(10) };
 
-    private static readonly string[] TabTitles = ["Tổng quan", "Bàn phục vụ", "Hóa đơn", "Bán chạy"];
-    private static readonly string[] TabIconChars = ["📈", "🪑", "🧾", "⭐"];
+    private static readonly string[] TabTitles = ["Tổng quan", "Bàn phục vụ", "Hóa đơn", "Kho hàng"];
+    private static readonly string[] TabIconChars = ["📈", "🪑", "🧾", "📦"];
 
     // ─────────────────────────────────────────────────────────────────────
     public DashboardPage(RevenueApiClient api, RevenueSessionStore session, IServiceProvider services)
@@ -216,10 +232,25 @@ public sealed class DashboardPage : ContentPage
         _invoiceToPicker.DateSelected += (_, _) => MarkCustomInvoiceRange();
         _invoicePresetPicker.SelectedIndex = 0;
 
+        _inventoryFilterButton.Clicked += async (_, _) => await LoadInventoryAsync();
+        _inventoryPresetPicker.Items.Add("Hôm nay");
+        _inventoryPresetPicker.Items.Add("Hôm qua");
+        _inventoryPresetPicker.Items.Add("7 ngày gần nhất");
+        _inventoryPresetPicker.Items.Add("Tháng trước");
+        _inventoryPresetPicker.Items.Add("Tùy chọn");
+        _inventoryPresetPicker.SelectedIndexChanged += async (_, _) =>
+        {
+            ApplyInventoryPreset();
+            await LoadInventoryAsync(silent: true);
+        };
+        _inventoryFromPicker.DateSelected += (_, _) => MarkCustomInventoryRange();
+        _inventoryToPicker.DateSelected += (_, _) => MarkCustomInventoryRange();
+        _inventoryPresetPicker.SelectedIndex = 0;
+
         _homeView    = BuildHomeView();
         _tablesView  = BuildTablesView();
         _invoicesView = BuildInvoicesView();
-        _topView     = BuildTopProductsView();
+        _topView     = BuildInventoryView();
 
         var contentGrid = new Grid();
         contentGrid.Children.Add(_homeView);
@@ -443,10 +474,34 @@ public sealed class DashboardPage : ContentPage
         });
     }
 
-    // ── top-products tab ──────────────────────────────────────────────────
-    private View BuildTopProductsView()
+    // ── inventory tab ─────────────────────────────────────────────────────
+    private View BuildInventoryView()
     {
-        // V1: bán chạy tự tải 7 ngày gần nhất theo hợp đồng hiện tại.
+        var filterGrid = new Grid
+        {
+            ColumnSpacing = AppUi.S(8),
+            RowSpacing = AppUi.S(10),
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto)
+            }
+        };
+
+        var presetShell = InputShell(_inventoryPresetPicker);
+        filterGrid.Add(presetShell, 0, 0);
+        Grid.SetColumnSpan(presetShell, 2);
+        filterGrid.Add(InputShell(_inventoryFromPicker), 0, 1);
+        filterGrid.Add(InputShell(_inventoryToPicker), 1, 1);
+        filterGrid.Add(_inventoryFilterButton, 0, 2);
+        Grid.SetColumnSpan(_inventoryFilterButton, 2);
+
         return Refreshable(new MauiScrollView
         {
             Content = new VerticalStackLayout
@@ -454,7 +509,15 @@ public sealed class DashboardPage : ContentPage
                 BackgroundColor = AppColors.Surface,
                 Padding = new Thickness(AppUi.S(12)),
                 Spacing = AppUi.S(12),
-                Children = { Section("Top món bán chạy", _topPanel) }
+                Children =
+                {
+                    Section("Bộ lọc kho hàng", filterGrid),
+                    Section("Nhập - xuất - tồn", new VerticalStackLayout
+                    {
+                        Spacing = AppUi.S(10),
+                        Children = { _inventorySummary, _inventoryPanel }
+                    })
+                }
             }
         });
     }
@@ -462,7 +525,7 @@ public sealed class DashboardPage : ContentPage
     // ── tab bar ───────────────────────────────────────────────────────────
     private View BuildTabBar()
     {
-        var tabs = new[] { Tab.Home, Tab.Tables, Tab.Invoices, Tab.TopProducts };
+        var tabs = new[] { Tab.Home, Tab.Tables, Tab.Invoices, Tab.Inventory };
         var columns = Enumerable.Repeat(new ColumnDefinition(GridLength.Star), 4).ToList();
 
         var grid = new Grid
@@ -636,7 +699,7 @@ public sealed class DashboardPage : ContentPage
         Tab.Home => _homeView,
         Tab.Tables => _tablesView,
         Tab.Invoices => _invoicesView,
-        Tab.TopProducts => _topView,
+        Tab.Inventory => _topView,
         _ => null
     };
 
@@ -645,7 +708,7 @@ public sealed class DashboardPage : ContentPage
         _homeView!.IsVisible = tab == Tab.Home;
         _tablesView!.IsVisible = tab == Tab.Tables;
         _invoicesView!.IsVisible = tab == Tab.Invoices;
-        _topView!.IsVisible = tab == Tab.TopProducts;
+        _topView!.IsVisible = tab == Tab.Inventory;
 
         foreach (var view in new[] { _homeView, _tablesView, _invoicesView, _topView }.Where(v => v is not null).Cast<View>())
         {
@@ -749,6 +812,45 @@ public sealed class DashboardPage : ContentPage
 
         _invoicePage = 1;
         _invoicePresetPicker.SelectedIndex = 4;
+    }
+
+    private void ApplyInventoryPreset()
+    {
+        var today = DateTime.Today;
+        _updatingInventoryPreset = true;
+        switch (_inventoryPresetPicker.SelectedIndex)
+        {
+            case 0:
+                _inventoryFromPicker.Date = today;
+                _inventoryToPicker.Date = today;
+                break;
+            case 1:
+                _inventoryFromPicker.Date = today.AddDays(-1);
+                _inventoryToPicker.Date = today.AddDays(-1);
+                break;
+            case 3:
+                var firstThisMonth = new DateTime(today.Year, today.Month, 1);
+                _inventoryFromPicker.Date = firstThisMonth.AddMonths(-1);
+                _inventoryToPicker.Date = firstThisMonth.AddDays(-1);
+                break;
+            case 2:
+                _inventoryFromPicker.Date = today.AddDays(-6);
+                _inventoryToPicker.Date = today;
+                break;
+            default:
+                break;
+        }
+        _updatingInventoryPreset = false;
+    }
+
+    private void MarkCustomInventoryRange()
+    {
+        if (_updatingInventoryPreset)
+        {
+            return;
+        }
+
+        _inventoryPresetPicker.SelectedIndex = 4;
     }
 
     // ── summary cards ─────────────────────────────────────────────────────
@@ -952,8 +1054,8 @@ public sealed class DashboardPage : ContentPage
             case Tab.Invoices:
                 await LoadInvoicesAsync(silent);
                 break;
-            case Tab.TopProducts:
-                await LoadTopProductsAsync(silent);
+            case Tab.Inventory:
+                await LoadInventoryAsync(silent);
                 break;
         }
 
@@ -1069,22 +1171,34 @@ public sealed class DashboardPage : ContentPage
         }
     }
 
-    private async Task LoadTopProductsAsync(bool silent = false)
+    private async Task LoadInventoryAsync(bool silent = false)
     {
         if (string.IsNullOrWhiteSpace(_session.StoreId)) return;
-        var to = StoreToday();
-        var from = to.AddDays(-6);
+        var from = PickerDate(_inventoryFromPicker);
+        var to = PickerDate(_inventoryToPicker);
+        if (from.Date > to.Date)
+        {
+            if (!silent)
+                await DisplayAlert("Khoảng ngày không hợp lệ", "Từ ngày phải nhỏ hơn hoặc bằng đến ngày.", "OK");
+            return;
+        }
+
         try
         {
-            var top = await _api.TopProductsAsync(from, to, _session.StoreId);
-            RenderTop(top.Items);
+            _inventoryFilterButton.IsEnabled = false;
+            var inventory = await _api.InventoryAsync(from, to, _session.StoreId);
+            RenderInventory(inventory);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
         {
             UpdateOfflineBanner();
             if (!silent)
-                await DisplayAlert("Không tải được món bán chạy", ex.Message, "OK");
+                await DisplayAlert("Không tải được kho hàng", ex.Message, "OK");
+        }
+        finally
+        {
+            _inventoryFilterButton.IsEnabled = true;
         }
     }
 
@@ -1153,13 +1267,34 @@ public sealed class DashboardPage : ContentPage
             _paymentPanel.Add(EmptyLabel("Chưa có dữ liệu thanh toán."));
     }
 
-    private void RenderTop(IReadOnlyList<TopProductDto> items)
+    private void RenderInventory(InventoryReportResponse report)
     {
-        _topPanel.Clear();
-        foreach (var item in items.Take(10))
-            _topPanel.Add(ListRow($"{item.ProductName}", $"SL {item.Quantity:N0}  •  {RevenueApiClient.Money(item.Revenue)}", showChevron: false));
-        if (_topPanel.Children.Count == 0)
-            _topPanel.Add(EmptyLabel("Chưa có dữ liệu."));
+        _inventoryPanel.Clear();
+        var rows = report.Items
+            .OrderBy(row => row.ProductName, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(row => row.BusinessDate)
+            .ToList();
+
+        _inventorySummary.Text = rows.Count == 0
+            ? $"Không có phát sinh kho trong khoảng {ShortDate(report.From)} - {ShortDate(report.To)}."
+            : $"{rows.Count:N0} dòng kho • {ShortDate(report.From)} - {ShortDate(report.To)}";
+
+        foreach (var item in rows.Take(200))
+        {
+            var unit = string.IsNullOrWhiteSpace(item.UnitName) ? string.Empty : $" {item.UnitName}";
+            var warning = item.MinStock > 0 && item.ClosingQty <= item.MinStock
+                ? $" • Tồn thấp <= {FormatQty(item.MinStock)}{unit}"
+                : string.Empty;
+            _inventoryPanel.Add(ListRow(
+                item.ProductName,
+                $"Ngày {ShortDate(item.BusinessDate)} • Nhập {FormatQty(item.ImportQty)}{unit} • Giá nhập {RevenueApiClient.Money(item.LastImportPrice)}\nXuất bán {FormatQty(item.SoldQty)}{unit} • Xuất khác {FormatQty(item.ManualExportQty)}{unit} • Tồn {FormatQty(item.ClosingQty)}{unit}{warning}",
+                showChevron: false));
+        }
+
+        if (_inventoryPanel.Children.Count == 0)
+        {
+            _inventoryPanel.Add(EmptyLabel("Chưa có dữ liệu kho."));
+        }
     }
 
     private void RenderTables(OpenTablesReport? report, string error)
@@ -1364,6 +1499,11 @@ public sealed class DashboardPage : ContentPage
 
     private static string ShortDate(string date)
         => DateTime.TryParse(date, out var value) ? value.ToString("dd/MM") : date;
+
+    private static string FormatQty(decimal value)
+        => value % 1 == 0
+            ? value.ToString("N0")
+            : value.ToString("N2").TrimEnd('0').TrimEnd('.', ',');
 
     private static DateTime PickerDate(MauiDatePicker picker)
         => picker.Date ?? DateTime.Today;
