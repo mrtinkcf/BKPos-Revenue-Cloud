@@ -1456,16 +1456,7 @@ public sealed class DashboardPage : ContentPage
             : $"{rows.Count:N0} dòng kho • {ShortDate(report.From)} - {ShortDate(report.To)}";
 
         foreach (var item in rows.Take(200))
-        {
-            var unit = string.IsNullOrWhiteSpace(item.UnitName) ? string.Empty : $" {item.UnitName}";
-            var warning = item.MinStock > 0 && item.ClosingQty <= item.MinStock
-                ? $" • Tồn thấp <= {FormatQty(item.MinStock)}{unit}"
-                : string.Empty;
-            _inventoryPanel.Add(ListRow(
-                item.ProductName,
-                $"Ngày {ShortDate(item.BusinessDate)} • Nhập {FormatQty(item.ImportQty)}{unit} • Giá nhập {RevenueApiClient.Money(item.LastImportPrice)}\nXuất bán {FormatQty(item.SoldQty)}{unit} • Xuất khác {FormatQty(item.ManualExportQty)}{unit} • Tồn {FormatQty(item.ClosingQty)}{unit}{warning}",
-                showChevron: false));
-        }
+            _inventoryPanel.Add(InventoryRow(item));
 
         if (_inventoryPanel.Children.Count == 0)
         {
@@ -1585,6 +1576,147 @@ public sealed class DashboardPage : ContentPage
             {
                 new Label { Text = $"{label}: {RevenueApiClient.Money(value)}", TextColor = AppColors.Navy, FontSize = AppUi.S(13) },
                 track
+            }
+        };
+    }
+
+    private static Border InventoryRow(InventoryReportItem item)
+    {
+        var unit = string.IsNullOrWhiteSpace(item.UnitName) ? string.Empty : $" {item.UnitName}";
+        var isLow = item.MinStock > 0 && item.ClosingQty <= item.MinStock;
+
+        // Header: tên hàng + ngày
+        var header = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+        header.Add(new Label
+        {
+            Text = item.ProductName,
+            TextColor = AppColors.Navy,
+            FontSize = AppUi.S(14),
+            FontAttributes = FontAttributes.Bold,
+            LineBreakMode = LineBreakMode.TailTruncation
+        }, 0, 0);
+        header.Add(new Label
+        {
+            Text = ShortDate(item.BusinessDate),
+            TextColor = AppColors.Muted,
+            FontSize = AppUi.S(12),
+            VerticalTextAlignment = TextAlignment.Center
+        }, 1, 0);
+
+        // Divider
+        var divider = new BoxView
+        {
+            Color = Color.FromArgb("#E2E8F0"),
+            HeightRequest = 1,
+            HorizontalOptions = LayoutOptions.Fill,
+            Margin = new Thickness(0, AppUi.S(2), 0, 0)
+        };
+
+        // Dòng nhập
+        var importRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+        importRow.Add(new Label
+        {
+            Text = $"↓  Nhập  {FormatQty(item.ImportQty)}{unit}",
+            TextColor = AppColors.Green,
+            FontSize = AppUi.S(13),
+            FontAttributes = FontAttributes.Bold,
+            VerticalTextAlignment = TextAlignment.Center
+        }, 0, 0);
+        importRow.Add(new Label
+        {
+            Text = RevenueApiClient.Money(item.LastImportPrice) + "/đvt",
+            TextColor = AppColors.Muted,
+            FontSize = AppUi.S(12),
+            HorizontalTextAlignment = TextAlignment.End,
+            VerticalTextAlignment = TextAlignment.Center
+        }, 1, 0);
+
+        // Dòng xuất
+        var exportRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+        exportRow.Add(new Label
+        {
+            Text = $"↑  Xuất bán  {FormatQty(item.SoldQty)}{unit}",
+            TextColor = AppColors.Orange,
+            FontSize = AppUi.S(13),
+            FontAttributes = FontAttributes.Bold,
+            VerticalTextAlignment = TextAlignment.Center
+        }, 0, 0);
+        exportRow.Add(new Label
+        {
+            Text = $"Xuất khác  {FormatQty(item.ManualExportQty)}{unit}",
+            TextColor = AppColors.Muted,
+            FontSize = AppUi.S(12),
+            HorizontalTextAlignment = TextAlignment.End,
+            VerticalTextAlignment = TextAlignment.Center
+        }, 1, 0);
+
+        // Dòng tồn
+        var stockRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            }
+        };
+        stockRow.Add(new Label
+        {
+            Text = $"■  Tồn  {FormatQty(item.ClosingQty)}{unit}",
+            TextColor = AppColors.Blue,
+            FontSize = AppUi.S(13),
+            FontAttributes = FontAttributes.Bold,
+            VerticalTextAlignment = TextAlignment.Center
+        }, 0, 0);
+        if (isLow)
+        {
+            stockRow.Add(new Border
+            {
+                BackgroundColor = Color.FromArgb("#FEE2E2"),
+                Stroke = Color.FromArgb("#FCA5A5"),
+                StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(6) },
+                Padding = new Thickness(AppUi.S(6), AppUi.S(2)),
+                VerticalOptions = LayoutOptions.Center,
+                Content = new Label
+                {
+                    Text = $"⚠ ≤ {FormatQty(item.MinStock)}{unit}",
+                    TextColor = AppColors.Red,
+                    FontSize = AppUi.S(11),
+                    FontAttributes = FontAttributes.Bold
+                }
+            }, 1, 0);
+        }
+
+        return new Border
+        {
+            Stroke = Color.FromArgb(isLow ? "#FDBA74" : "#E2E8F0"),
+            StrokeShape = new RoundRectangle { CornerRadius = AppUi.S(12) },
+            BackgroundColor = isLow ? Color.FromArgb("#FFFBEB") : Colors.White,
+            Padding = new Thickness(AppUi.S(14), AppUi.S(12)),
+            Content = new VerticalStackLayout
+            {
+                Spacing = AppUi.S(7),
+                Children = { header, divider, importRow, exportRow, stockRow }
             }
         };
     }
