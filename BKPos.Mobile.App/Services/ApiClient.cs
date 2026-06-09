@@ -542,7 +542,7 @@ public sealed record AddOrderLineRequestDto(string ProductId, string ProductName
 
 public sealed record UpdateOrderLineRequestDto(int? Quantity, string? Note);
 
-public sealed record MutationResponseDto(bool Ok, string OrderId, decimal Total, DateTime? ModifiedAt, OrderVersionDto? Version);
+public sealed record MutationResponseDto(bool Ok, string OrderId, decimal Total, DateTime? ModifiedAt, OrderVersionDto? Version, OrderDto? Order = null);
 
 public sealed record TransferOrderRequestDto(string? TargetTableId, string? TargetTableExternalId);
 

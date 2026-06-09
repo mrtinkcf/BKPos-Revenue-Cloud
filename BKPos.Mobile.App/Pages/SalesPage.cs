@@ -44,6 +44,7 @@ public sealed class SalesPage : ContentPage
     private OrderDto? _currentOrder;
     private readonly Dictionary<string, CancellationTokenSource> _autoKitchenPrintTimers = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _autoKitchenLock = new();
+    private CancellationTokenSource? _tableRefreshDebounce;
     private bool _isBusy;
 
     public SalesPage(ApiClient api, MobileLoginSettings loginSettings, MobilePrintSettings printSettings)
@@ -680,11 +681,108 @@ public sealed class SalesPage : ContentPage
         }, "Đã tải dữ liệu bán hàng.");
     }
 
-    private async Task LoadTablesAsync()
+    private async Task LoadTablesAsync(CancellationToken cancellationToken = default)
     {
-        var tables = await _api.GetTablesAsync();
+        var tables = await _api.GetTablesAsync(cancellationToken: cancellationToken);
         _allTables = tables.Select(table => new TableCard(table)).ToList();
         ApplyTableFilter();
+    }
+
+    private void ApplyMutationResponse(MutationResponseDto mutation)
+    {
+        if (mutation.Order is not null)
+        {
+            _currentOrder = mutation.Order;
+        }
+        else if (_currentOrder is not null
+                 && string.Equals(_currentOrder.OrderId, mutation.OrderId, StringComparison.OrdinalIgnoreCase))
+        {
+            _currentOrder = _currentOrder with
+            {
+                Total = mutation.Total,
+                ModifiedAt = mutation.ModifiedAt
+            };
+        }
+
+        UpdateCurrentTableSnapshot(mutation);
+        ApplyOrder();
+        ApplyTableFilter();
+        ScheduleTablesRefresh();
+    }
+
+    private void UpdateCurrentTableSnapshot(MutationResponseDto mutation)
+    {
+        if (_currentTable is null)
+        {
+            return;
+        }
+
+        var orderId = _currentOrder?.OrderId ?? mutation.OrderId;
+        _currentTable = _currentTable with
+        {
+            HasOpenOrder = true,
+            OrderId = orderId,
+            OccupiedAt = _currentTable.OccupiedAt ?? _currentOrder?.CreatedAt,
+            Total = mutation.Total
+        };
+
+        for (var index = 0; index < _allTables.Count; index++)
+        {
+            if (string.Equals(_allTables[index].Source.TableId, _currentTable.TableId, StringComparison.OrdinalIgnoreCase))
+            {
+                _allTables[index] = new TableCard(_currentTable);
+                break;
+            }
+        }
+    }
+
+    private void ScheduleTablesRefresh()
+    {
+        _tableRefreshDebounce?.Cancel();
+
+        var cts = new CancellationTokenSource();
+        _tableRefreshDebounce = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+                var tables = await _api.GetTablesAsync(cancellationToken: cts.Token);
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    if (cts.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    _allTables = tables.Select(table => new TableCard(table)).ToList();
+                    ApplyTableFilter();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // Background table refresh must not block ordering.
+            }
+            finally
+            {
+                if (ReferenceEquals(_tableRefreshDebounce, cts))
+                {
+                    _tableRefreshDebounce = null;
+                }
+
+                cts.Dispose();
+            }
+        });
+    }
+
+    private void CancelPendingTableRefresh()
+    {
+        _tableRefreshDebounce?.Cancel();
+        _tableRefreshDebounce = null;
     }
 
     private void ApplyTableFilter()
@@ -759,10 +857,8 @@ public sealed class SalesPage : ContentPage
 
         await RunAsync(async () =>
         {
-            await _api.AddLineAsync(_currentOrder.OrderId, product, 1);
-            await RefreshCurrentOrderAsync();
-            ApplyOrder();
-            await LoadTablesAsync();
+            var mutation = await _api.AddLineAsync(_currentOrder.OrderId, product, 1);
+            ApplyMutationResponse(mutation);
             ScheduleAutoKitchenPrintIfNeeded();
         }, $"Đã thêm {product.Name}.");
     }
@@ -787,10 +883,8 @@ public sealed class SalesPage : ContentPage
             return;
         }
 
-        await _api.UpdateLineAsync(_currentOrder.OrderId, line.Source.Id, quantity, note);
-        await RefreshCurrentOrderAsync();
-        ApplyOrder();
-        await LoadTablesAsync();
+        var mutation = await _api.UpdateLineAsync(_currentOrder.OrderId, line.Source.Id, quantity, note);
+        ApplyMutationResponse(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã cập nhật món.";
     }
@@ -802,10 +896,8 @@ public sealed class SalesPage : ContentPage
             return;
         }
 
-        await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
-        await RefreshCurrentOrderAsync();
-        ApplyOrder();
-        await LoadTablesAsync();
+        var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
+        ApplyMutationResponse(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã xóa món.";
     }
@@ -829,10 +921,8 @@ public sealed class SalesPage : ContentPage
 
         await RunAsync(async () =>
         {
-            await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
-            await RefreshCurrentOrderAsync();
-            ApplyOrder();
-            await LoadTablesAsync();
+            var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
+            ApplyMutationResponse(mutation);
             ScheduleAutoKitchenPrintIfNeeded();
         }, "Đã hủy món.", "Hủy món thất bại");
     }
@@ -1538,6 +1628,7 @@ public sealed class SalesPage : ContentPage
         }
 
         _loginSettings.DisableAutoLogin();
+        CancelPendingTableRefresh();
         CancelAllAutoKitchenTimers();
         try
         {
