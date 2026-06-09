@@ -730,14 +730,7 @@ public sealed class SalesPage : ContentPage
             }
         }
 
-        for (var index = 0; index < _tables.Count; index++)
-        {
-            if (string.Equals(_tables[index].Source.TableId, _currentTable.TableId, StringComparison.OrdinalIgnoreCase))
-            {
-                _tables[index] = new TableCard(_currentTable, true);
-                break;
-            }
-        }
+        RefreshVisibleTableSelection(_currentTable);
     }
 
     private void ScheduleTablesRefresh()
@@ -814,6 +807,18 @@ public sealed class SalesPage : ContentPage
         => _currentTable is not null
            && string.Equals(_currentTable.TableId, tableId, StringComparison.OrdinalIgnoreCase);
 
+    private void RefreshVisibleTableSelection(TableDto? updatedTable = null)
+    {
+        for (var index = 0; index < _tables.Count; index++)
+        {
+            var source = updatedTable is not null
+                         && string.Equals(_tables[index].Source.TableId, updatedTable.TableId, StringComparison.OrdinalIgnoreCase)
+                ? updatedTable
+                : _tables[index].Source;
+            _tables[index] = new TableCard(source, IsCurrentTable(source.TableId));
+        }
+    }
+
     private void ApplyProductFilter()
     {
         var keyword = (_search.Text ?? string.Empty).Trim();
@@ -838,6 +843,8 @@ public sealed class SalesPage : ContentPage
         await RunAsync(async () =>
         {
             _currentTable = table;
+            RefreshVisibleTableSelection();
+
             var opened = await _api.OpenTableAsync(table.TableId);
             _currentOrder = opened.Order ?? await _api.GetOrderAsync(opened.OrderId);
 
@@ -1616,6 +1623,7 @@ public sealed class SalesPage : ContentPage
 
         _currentOrder = null;
         _currentTable = null;
+        RefreshVisibleTableSelection();
         ApplyOrder();
     }
 
