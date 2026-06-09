@@ -223,11 +223,9 @@ internal sealed class TableCard
         Name = source.TableName;
         Status = source.HasOpenOrder ? "Đang phục vụ" : "Bàn trống";
         Total = source.HasOpenOrder ? AppUi.Money(source.Total) : "Sẵn sàng";
-        Background = isCurrent
-            ? AppUi.BlueSoft
-            : source.HasOpenOrder
-                ? Color.FromArgb("#FFF7ED")
-                : Color.FromArgb("#ECFDF5");
+        Background = source.HasOpenOrder
+            ? Color.FromArgb("#FFF7ED")
+            : Color.FromArgb("#ECFDF5");
         BorderColor = isCurrent
             ? AppUi.Blue
             : source.HasOpenOrder
@@ -278,4 +276,3 @@ internal sealed class OrderLineCard
     public string KitchenPrintStatus { get; }
     public Color KitchenPrintStatusColor { get; }
 }
-

@@ -12,6 +12,7 @@ using Android.Content;
 using Android.Views.InputMethods;
 #elif IOS
 using BKPos.Mobile.App.Platforms.iOS;
+using UIKit;
 #endif
 
 namespace BKPos.Mobile.App;
@@ -32,6 +33,12 @@ public static class MauiProgram
                 EntryHandler.Mapper.AppendToMapping("BKPosNoFullscreenIme", (handler, _) =>
                 {
                     DisableNativeKeyboard(handler);
+                });
+#elif IOS
+                EntryHandler.Mapper.AppendToMapping("BKPosPlainEntry", (handler, _) =>
+                {
+                    handler.PlatformView.BorderStyle = UITextBorderStyle.None;
+                    handler.PlatformView.BackgroundColor = UIColor.Clear;
                 });
 #endif
             })
