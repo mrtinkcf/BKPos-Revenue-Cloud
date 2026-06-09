@@ -217,15 +217,24 @@ internal static class AppUi
 
 internal sealed class TableCard
 {
-    public TableCard(TableDto source)
+    public TableCard(TableDto source, bool isCurrent = false)
     {
         Source = source;
         Name = source.TableName;
         Status = source.HasOpenOrder ? "Đang phục vụ" : "Bàn trống";
         Total = source.HasOpenOrder ? AppUi.Money(source.Total) : "Sẵn sàng";
-        Background = source.HasOpenOrder ? Color.FromArgb("#FFF7ED") : Color.FromArgb("#ECFDF5");
-        BorderColor = source.HasOpenOrder ? Color.FromArgb("#FDBA74") : Color.FromArgb("#86EFAC");
+        Background = isCurrent
+            ? AppUi.BlueSoft
+            : source.HasOpenOrder
+                ? Color.FromArgb("#FFF7ED")
+                : Color.FromArgb("#ECFDF5");
+        BorderColor = isCurrent
+            ? AppUi.Blue
+            : source.HasOpenOrder
+                ? Color.FromArgb("#FDBA74")
+                : Color.FromArgb("#86EFAC");
         StatusColor = source.HasOpenOrder ? AppUi.Warning : AppUi.Success;
+        BorderThickness = isCurrent ? 2 : 1;
     }
 
     public TableDto Source { get; }
@@ -235,6 +244,7 @@ internal sealed class TableCard
     public Color Background { get; }
     public Color BorderColor { get; }
     public Color StatusColor { get; }
+    public int BorderThickness { get; }
 }
 
 internal sealed class OrderLineCard
@@ -268,5 +278,4 @@ internal sealed class OrderLineCard
     public string KitchenPrintStatus { get; }
     public Color KitchenPrintStatusColor { get; }
 }
-
 

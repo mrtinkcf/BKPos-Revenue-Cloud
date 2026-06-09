@@ -567,12 +567,12 @@ public sealed class SalesPage : ContentPage
                 var card = new Border
                 {
                     Padding = AppUi.S(5),
-                    StrokeThickness = 1,
                     StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 10 },
                     Content = new VerticalStackLayout { Spacing = 1, Children = { name, status, total } }
                 };
                 card.SetBinding(Border.BackgroundColorProperty, nameof(TableCard.Background));
                 card.SetBinding(Border.StrokeProperty, nameof(TableCard.BorderColor));
+                card.SetBinding(Border.StrokeThicknessProperty, nameof(TableCard.BorderThickness));
 #if IOS
                 var tap = new TapGestureRecognizer();
                 tap.Tapped += async (sender, _) =>
@@ -626,19 +626,10 @@ public sealed class SalesPage : ContentPage
     private static async Task MarkTappedAsync(Border card)
     {
 #if IOS
-        var stroke = card.Stroke;
-        var strokeThickness = card.StrokeThickness;
-        var background = card.BackgroundColor;
-
-        card.Stroke = AppUi.Blue;
-        card.StrokeThickness = 2;
-        card.BackgroundColor = AppUi.BlueSoft;
+        // Do not mutate bound color/stroke values here. iOS recycles CollectionView cells,
+        // and restoring old colors after an async animation can leak state into another item.
         await card.ScaleTo(0.98, 55, Easing.CubicOut);
         await card.ScaleTo(1, 85, Easing.CubicOut);
-
-        card.Stroke = stroke;
-        card.StrokeThickness = strokeThickness;
-        card.BackgroundColor = background;
 #else
         await Task.CompletedTask;
 #endif
@@ -713,9 +704,13 @@ public sealed class SalesPage : ContentPage
         _tables.Clear();
         foreach (var table in filtered)
         {
-            _tables.Add(table);
+            _tables.Add(new TableCard(table.Source, IsCurrentTable(table.Source.TableId)));
         }
     }
+
+    private bool IsCurrentTable(string tableId)
+        => _currentTable is not null
+           && string.Equals(_currentTable.TableId, tableId, StringComparison.OrdinalIgnoreCase);
 
     private void ApplyProductFilter()
     {
