@@ -245,7 +245,7 @@ public sealed class LoginPage : ContentPage
             {
                 await DisplayAlert(
                     "Sai ID bản quyền",
-                    "Bản quyền mobile trên máy chủ không khớp với thiết bị Android này. Vui lòng kích hoạt lại bằng ID máy đang hiển thị trong app.",
+                    $"Bản quyền mobile trên máy chủ không khớp với {GetDevicePlatformLabel()}. Vui lòng kích hoạt lại bằng ID máy đang hiển thị trong app.\n\nID máy hiện tại: {currentHardwareId}",
                     "OK");
                 return;
             }
@@ -282,5 +282,20 @@ public sealed class LoginPage : ContentPage
         _exitButton.IsEnabled = !busy;
         _username.IsEnabled = !busy;
         _password.IsEnabled = !busy;
+    }
+
+    private static string GetDevicePlatformLabel()
+    {
+        if (DeviceInfo.Current.Platform == DevicePlatform.iOS)
+        {
+            return "thiết bị iOS này";
+        }
+
+        if (DeviceInfo.Current.Platform == DevicePlatform.Android)
+        {
+            return "thiết bị Android này";
+        }
+
+        return "thiết bị này";
     }
 }
