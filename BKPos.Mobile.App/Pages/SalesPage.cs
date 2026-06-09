@@ -688,7 +688,7 @@ public sealed class SalesPage : ContentPage
         ApplyTableFilter();
     }
 
-    private void ApplyMutationResponse(MutationResponseDto mutation)
+    private async Task ApplyMutationResponseAsync(MutationResponseDto mutation)
     {
         if (mutation.Order is not null)
         {
@@ -697,33 +697,28 @@ public sealed class SalesPage : ContentPage
         else if (_currentOrder is not null
                  && string.Equals(_currentOrder.OrderId, mutation.OrderId, StringComparison.OrdinalIgnoreCase))
         {
-            _currentOrder = _currentOrder with
-            {
-                Total = mutation.Total,
-                ModifiedAt = mutation.ModifiedAt
-            };
+            // Backward compatible with older Mobile Server builds that only return
+            // mutation totals. The UI must still show the updated order immediately.
+            _currentOrder = await _api.GetOrderAsync(_currentOrder.OrderId);
         }
 
-        UpdateCurrentTableSnapshot(mutation);
+        UpdateCurrentTableSnapshot(_currentOrder?.OrderId ?? mutation.OrderId, _currentOrder?.Total ?? mutation.Total);
         ApplyOrder();
-        ApplyTableFilter();
-        ScheduleTablesRefresh();
     }
 
-    private void UpdateCurrentTableSnapshot(MutationResponseDto mutation)
+    private void UpdateCurrentTableSnapshot(string orderId, decimal total)
     {
         if (_currentTable is null)
         {
             return;
         }
 
-        var orderId = _currentOrder?.OrderId ?? mutation.OrderId;
         _currentTable = _currentTable with
         {
             HasOpenOrder = true,
             OrderId = orderId,
             OccupiedAt = _currentTable.OccupiedAt ?? _currentOrder?.CreatedAt,
-            Total = mutation.Total
+            Total = total
         };
 
         for (var index = 0; index < _allTables.Count; index++)
@@ -731,6 +726,15 @@ public sealed class SalesPage : ContentPage
             if (string.Equals(_allTables[index].Source.TableId, _currentTable.TableId, StringComparison.OrdinalIgnoreCase))
             {
                 _allTables[index] = new TableCard(_currentTable);
+                break;
+            }
+        }
+
+        for (var index = 0; index < _tables.Count; index++)
+        {
+            if (string.Equals(_tables[index].Source.TableId, _currentTable.TableId, StringComparison.OrdinalIgnoreCase))
+            {
+                _tables[index] = new TableCard(_currentTable, true);
                 break;
             }
         }
@@ -837,11 +841,7 @@ public sealed class SalesPage : ContentPage
             var opened = await _api.OpenTableAsync(table.TableId);
             _currentOrder = opened.Order ?? await _api.GetOrderAsync(opened.OrderId);
 
-            await LoadTablesAsync();
-            _currentTable = _allTables.FirstOrDefault(item =>
-                                string.Equals(item.Source.TableId, table.TableId, StringComparison.OrdinalIgnoreCase))
-                            ?.Source
-                            ?? table;
+            UpdateCurrentTableSnapshot(_currentOrder.OrderId, _currentOrder.Total);
             ApplyOrder();
             ScheduleAutoKitchenPrintIfNeeded();
         }, $"Đã mở {table.TableName}.");
@@ -858,7 +858,7 @@ public sealed class SalesPage : ContentPage
         await RunAsync(async () =>
         {
             var mutation = await _api.AddLineAsync(_currentOrder.OrderId, product, 1);
-            ApplyMutationResponse(mutation);
+            await ApplyMutationResponseAsync(mutation);
             ScheduleAutoKitchenPrintIfNeeded();
         }, $"Đã thêm {product.Name}.");
     }
@@ -884,7 +884,7 @@ public sealed class SalesPage : ContentPage
         }
 
         var mutation = await _api.UpdateLineAsync(_currentOrder.OrderId, line.Source.Id, quantity, note);
-        ApplyMutationResponse(mutation);
+        await ApplyMutationResponseAsync(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã cập nhật món.";
     }
@@ -897,7 +897,7 @@ public sealed class SalesPage : ContentPage
         }
 
         var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
-        ApplyMutationResponse(mutation);
+        await ApplyMutationResponseAsync(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã xóa món.";
     }
@@ -922,7 +922,7 @@ public sealed class SalesPage : ContentPage
         await RunAsync(async () =>
         {
             var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
-            ApplyMutationResponse(mutation);
+            await ApplyMutationResponseAsync(mutation);
             ScheduleAutoKitchenPrintIfNeeded();
         }, "Đã hủy món.", "Hủy món thất bại");
     }
