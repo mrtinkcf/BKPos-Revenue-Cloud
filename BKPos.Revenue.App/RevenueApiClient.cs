@@ -101,7 +101,17 @@ public sealed class RevenueApiClient
         => GetCachedAsync<TopProductsResponse>($"/reports/top-products?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}&limit=5", $"top_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
 
     public Task<InventoryReportResponse> InventoryAsync(DateTime from, DateTime to, string storeId, CancellationToken cancellationToken = default)
-        => GetCachedAsync<InventoryReportResponse>($"/reports/inventory?from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", $"inventory_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
+        => GetCachedAsync<InventoryReportResponse>($"/reports/inventory?period=custom&from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}", $"inventory_{from:yyyyMMdd}_{to:yyyyMMdd}", cancellationToken);
+
+    public Task<InventoryReportResponse> InventoryCurrentStockAsync(string storeId, CancellationToken cancellationToken = default)
+    {
+        var from = new DateTime(2000, 1, 1);
+        var to = DateTime.Today.AddDays(1);
+        return GetCachedAsync<InventoryReportResponse>(
+            $"/reports/inventory?period=custom&from={DateOnly.FromDateTime(from):yyyy-MM-dd}&to={DateOnly.FromDateTime(to):yyyy-MM-dd}&storeId={Uri.EscapeDataString(storeId)}",
+            $"inventory_current_stock_{to:yyyyMMdd}",
+            cancellationToken);
+    }
 
     public Task<InvoiceListResponse> InvoicesAsync(DateTime from, DateTime to, string storeId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {

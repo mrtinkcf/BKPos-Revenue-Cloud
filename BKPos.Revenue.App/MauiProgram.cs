@@ -9,6 +9,21 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            .ConfigureMauiHandlers(handlers =>
+            {
+#if IOS || MACCATALYST
+                Microsoft.Maui.Handlers.DatePickerHandler.Mapper.AppendToMapping("BKPosTransparentNativeBackground", (handler, view) =>
+                {
+                    handler.PlatformView.BackgroundColor = UIKit.UIColor.Clear;
+                    handler.PlatformView.BorderStyle = UIKit.UITextBorderStyle.None;
+                });
+                Microsoft.Maui.Handlers.PickerHandler.Mapper.AppendToMapping("BKPosTransparentNativeBackground", (handler, view) =>
+                {
+                    handler.PlatformView.BackgroundColor = UIKit.UIColor.Clear;
+                    handler.PlatformView.BorderStyle = UIKit.UITextBorderStyle.None;
+                });
+#endif
+            })
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");

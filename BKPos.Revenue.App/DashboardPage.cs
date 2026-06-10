@@ -17,15 +17,15 @@ public sealed class DashboardPage : ContentPage
     private readonly IServiceProvider _services;
 
     // ── data controls (kept for existing Render* / Load* methods) ────────
-    private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiPicker _rangePresetPicker = new() { Title = "Chọn khoảng báo cáo", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _invoiceFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _invoiceToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiPicker _invoicePresetPicker = new() { Title = "Lọc hóa đơn", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _inventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _inventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiPicker _inventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _fromPicker = new() { Date = DateTime.Today.AddDays(-6), TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _toPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiPicker _rangePresetPicker = new() { Title = "Chọn khoảng báo cáo", TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _invoiceFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _invoiceToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiPicker _invoicePresetPicker = new() { Title = "Lọc hóa đơn", TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _inventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _inventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiPicker _inventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
     private readonly Label _offlineBanner = new() { TextColor = Colors.White, BackgroundColor = AppColors.Red, Padding = new Thickness(AppUi.S(12), AppUi.S(6)), IsVisible = false, FontSize = AppUi.S(13) };
     private readonly Label _syncStatus = new() { TextColor = Color.FromArgb("#94A3B8"), FontSize = AppUi.S(11) };
     private readonly Label _todayBadge = new() { TextColor = AppColors.Blue, FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold };
@@ -36,9 +36,9 @@ public sealed class DashboardPage : ContentPage
     private readonly Label _rangeRevenue = ValueLabel(AppUi.S(22), AppColors.Blue);
     private readonly Label _rangeInvoices = new() { FontSize = AppUi.S(14), FontAttributes = FontAttributes.Bold, TextColor = AppColors.Navy };
     private readonly Label _rangePayments = new() { FontSize = AppUi.S(12), TextColor = AppColors.Muted, LineBreakMode = LineBreakMode.WordWrap };
-    private readonly MauiDatePicker _homeInventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiDatePicker _homeInventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
-    private readonly MauiPicker _homeInventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13) };
+    private readonly MauiDatePicker _homeInventoryFromPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiDatePicker _homeInventoryToPicker = new() { Date = DateTime.Today, TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
+    private readonly MauiPicker _homeInventoryPresetPicker = new() { Title = "Lọc kho hàng", TextColor = AppColors.Navy, FontSize = AppUi.S(13), BackgroundColor = Colors.Transparent };
     private readonly Label _homeInventoryImportValue = ValueLabel(AppUi.S(20), AppColors.Green);
     private readonly Label _homeInventoryExportValue = ValueLabel(AppUi.S(20), AppColors.Orange);
     private readonly Label _homeInventoryStockValue = ValueLabel(AppUi.S(20), AppColors.Blue);
@@ -120,6 +120,7 @@ public sealed class DashboardPage : ContentPage
     private bool _updatingInvoicePreset;
     private bool _updatingInventoryPreset;
     private bool _updatingHomeInventoryPreset;
+    private bool _autoRefreshing;
     private int _invoicePage = 1;
     private List<StoreDto> _stores = [];
     private string _storeTimezone = "Asia/Ho_Chi_Minh";
@@ -181,7 +182,7 @@ public sealed class DashboardPage : ContentPage
         _todayBadge.Text = $"DOANH THU HÔM NAY • {StoreToday():dd/MM/yyyy}";
         _autoRefreshTimer = Dispatcher.CreateTimer();
         _autoRefreshTimer.Interval = TimeSpan.FromSeconds(60);
-        _autoRefreshTimer.Tick += async (_, _) => await LoadActiveTabAsync(silent: true, force: true);
+        _autoRefreshTimer.Tick += async (_, _) => await AutoRefreshAsync();
         Build();
     }
 
@@ -1133,6 +1134,32 @@ public sealed class DashboardPage : ContentPage
         }
     }
 
+    private async Task AutoRefreshAsync()
+    {
+        if (_loading || _autoRefreshing)
+        {
+            return;
+        }
+
+        try
+        {
+            _autoRefreshing = true;
+            _api.ResetCacheStatus();
+            await EnsureStoreAsync();
+            await LoadActiveTabAsync(silent: true, force: true);
+            UpdateOfflineBanner();
+        }
+        catch
+        {
+            UpdateOfflineBanner();
+        }
+        finally
+        {
+            ClearRefreshIndicators();
+            _autoRefreshing = false;
+        }
+    }
+
     private async Task EnsureStoreAsync()
     {
         if (_stores.Count > 0 && !string.IsNullOrWhiteSpace(_session.StoreId))
@@ -1285,8 +1312,10 @@ public sealed class DashboardPage : ContentPage
         try
         {
             _homeInventoryButton.IsEnabled = false;
-            var inventory = await _api.InventoryAsync(from, to, _session.StoreId);
-            RenderHomeInventory(inventory);
+            var periodInventoryTask = _api.InventoryAsync(from, to, _session.StoreId);
+            var currentStockTask = _api.InventoryCurrentStockAsync(_session.StoreId);
+            await Task.WhenAll(periodInventoryTask, currentStockTask);
+            RenderHomeInventory(periodInventoryTask.Result, currentStockTask.Result);
             UpdateOfflineBanner();
         }
         catch (Exception ex)
@@ -1420,28 +1449,32 @@ public sealed class DashboardPage : ContentPage
             _paymentPanel.Add(EmptyLabel("Chưa có dữ liệu thanh toán."));
     }
 
-    private void RenderHomeInventory(InventoryReportResponse report)
+    private void RenderHomeInventory(InventoryReportResponse report, InventoryReportResponse currentStockReport)
     {
         var rows = report.Items;
         var importValue = rows.Sum(item => item.ImportQty * item.LastImportPrice);
         var exportValue = rows.Sum(item => item.TotalExportQty * item.LastImportPrice);
+        var currentStockRows = LatestInventoryRows(currentStockReport.Items);
+        var stockValue = currentStockRows.Sum(item => item.ClosingQty * item.LastImportPrice);
+        var currentStockCount = currentStockRows.Count(item => item.ClosingQty != 0);
 
-        var latestRows = rows
+
+        _homeInventoryImportValue.Text = RevenueApiClient.Money(importValue);
+        _homeInventoryExportValue.Text = RevenueApiClient.Money(exportValue);
+        _homeInventoryStockValue.Text = RevenueApiClient.Money(stockValue);
+        _homeInventoryStatus.Text = rows.Count == 0
+            ? $"Chưa có dữ liệu nhập/xuất trong khoảng {ShortDate(report.From)} - {ShortDate(report.To)} • Tồn hiện tại: {currentStockCount:N0} mặt hàng."
+            : $"Nhập/xuất {ShortDate(report.From)} - {ShortDate(report.To)} • Tồn hiện tại: {currentStockCount:N0} mặt hàng.";
+    }
+
+    private static List<InventoryReportItem> LatestInventoryRows(IEnumerable<InventoryReportItem> rows)
+        => rows
             .GroupBy(item => string.IsNullOrWhiteSpace(item.ProductId) ? item.ProductName : item.ProductId)
             .Select(group => group
                 .OrderByDescending(item => ParseReportDate(item.BusinessDate))
                 .ThenByDescending(item => item.UpdatedAt ?? DateTimeOffset.MinValue)
                 .First())
             .ToList();
-        var stockValue = latestRows.Sum(item => item.ClosingQty * item.LastImportPrice);
-
-        _homeInventoryImportValue.Text = RevenueApiClient.Money(importValue);
-        _homeInventoryExportValue.Text = RevenueApiClient.Money(exportValue);
-        _homeInventoryStockValue.Text = RevenueApiClient.Money(stockValue);
-        _homeInventoryStatus.Text = rows.Count == 0
-            ? $"Chưa có dữ liệu kho trong khoảng {ShortDate(report.From)} - {ShortDate(report.To)}."
-            : $"Khoảng {ShortDate(report.From)} - {ShortDate(report.To)} • {latestRows.Count:N0} mặt hàng có tồn.";
-    }
 
     private void RenderInventory(InventoryReportResponse report)
     {
