@@ -1039,14 +1039,25 @@ public sealed class DashboardPage : ContentPage
         };
 
     private static Border InputShell(View content)
-        => new()
+    {
+        var height = AppUi.S(44);
+        content.BackgroundColor = Colors.Transparent;
+        content.HeightRequest = height - AppUi.S(2);
+        content.MinimumHeightRequest = height - AppUi.S(2);
+        content.HorizontalOptions = LayoutOptions.Fill;
+        content.VerticalOptions = LayoutOptions.Center;
+
+        return new Border
         {
             Stroke = Color.FromArgb("#D8E1EC"),
             StrokeShape = new RoundRectangle { CornerRadius = 10 },
             BackgroundColor = Color.FromArgb("#F8FAFC"),
-            Padding = new Thickness(AppUi.S(8), 0),
+            HeightRequest = height,
+            MinimumHeightRequest = height,
+            Padding = new Thickness(AppUi.S(14), 0),
             Content = content
         };
+    }
 
     private Border TodaySummaryBadge()
         => new()
