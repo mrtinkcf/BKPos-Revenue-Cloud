@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+using System.Globalization;
+using System.ComponentModel;
 using System.Text;
 using BKPos.Core.Formatting;
 using BKPos.Mobile.App.Services;
@@ -215,9 +216,25 @@ internal static class AppUi
     }
 }
 
-internal sealed class TableCard
+internal sealed class TableCard : INotifyPropertyChanged
 {
     public TableCard(TableDto source, bool isCurrent = false)
+    {
+        Update(source, isCurrent);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public TableDto Source { get; private set; } = null!;
+    public string Name { get; private set; } = string.Empty;
+    public string Status { get; private set; } = string.Empty;
+    public string Total { get; private set; } = string.Empty;
+    public Color Background { get; private set; } = AppUi.Surface;
+    public Color BorderColor { get; private set; } = AppUi.Border;
+    public Color StatusColor { get; private set; } = AppUi.Muted;
+    public int BorderThickness { get; private set; }
+
+    public void Update(TableDto source, bool isCurrent)
     {
         Source = source;
         Name = source.TableName;
@@ -226,23 +243,42 @@ internal sealed class TableCard
         Background = source.HasOpenOrder
             ? Color.FromArgb("#FFF7ED")
             : Color.FromArgb("#ECFDF5");
-        BorderColor = isCurrent
+        BorderColor = ResolveBorderColor(source, isCurrent);
+        StatusColor = source.HasOpenOrder ? AppUi.Warning : AppUi.Success;
+        BorderThickness = isCurrent ? 2 : 1;
+
+        NotifyAll();
+    }
+
+    public void SetCurrent(bool isCurrent)
+    {
+        BorderColor = ResolveBorderColor(Source, isCurrent);
+        BorderThickness = isCurrent ? 2 : 1;
+        OnPropertyChanged(nameof(BorderColor));
+        OnPropertyChanged(nameof(BorderThickness));
+    }
+
+    private static Color ResolveBorderColor(TableDto source, bool isCurrent)
+        => isCurrent
             ? AppUi.Blue
             : source.HasOpenOrder
                 ? Color.FromArgb("#FDBA74")
                 : Color.FromArgb("#86EFAC");
-        StatusColor = source.HasOpenOrder ? AppUi.Warning : AppUi.Success;
-        BorderThickness = isCurrent ? 2 : 1;
+
+    private void NotifyAll()
+    {
+        OnPropertyChanged(nameof(Source));
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(Status));
+        OnPropertyChanged(nameof(Total));
+        OnPropertyChanged(nameof(Background));
+        OnPropertyChanged(nameof(BorderColor));
+        OnPropertyChanged(nameof(StatusColor));
+        OnPropertyChanged(nameof(BorderThickness));
     }
 
-    public TableDto Source { get; }
-    public string Name { get; }
-    public string Status { get; }
-    public string Total { get; }
-    public Color Background { get; }
-    public Color BorderColor { get; }
-    public Color StatusColor { get; }
-    public int BorderThickness { get; }
+    private void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
 internal sealed class OrderLineCard

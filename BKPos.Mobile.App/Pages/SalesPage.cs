@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using BKPos.Mobile.App.Services;
 using Microsoft.Maui.ApplicationModel;
 
@@ -725,12 +725,12 @@ public sealed class SalesPage : ContentPage
         {
             if (string.Equals(_allTables[index].Source.TableId, _currentTable.TableId, StringComparison.OrdinalIgnoreCase))
             {
-                _allTables[index] = new TableCard(_currentTable);
+                _allTables[index].Update(_currentTable, false);
                 break;
             }
         }
 
-        RefreshVisibleTableSelection(_currentTable);
+        RefreshVisibleTableSelection(updatedTable: _currentTable);
     }
 
     private void ScheduleTablesRefresh()
@@ -807,15 +807,32 @@ public sealed class SalesPage : ContentPage
         => _currentTable is not null
            && string.Equals(_currentTable.TableId, tableId, StringComparison.OrdinalIgnoreCase);
 
-    private void RefreshVisibleTableSelection(TableDto? updatedTable = null)
+    private void RefreshVisibleTableSelection(string? previousTableId = null, TableDto? updatedTable = null)
     {
+        var currentTableId = _currentTable?.TableId;
         for (var index = 0; index < _tables.Count; index++)
         {
-            var source = updatedTable is not null
-                         && string.Equals(_tables[index].Source.TableId, updatedTable.TableId, StringComparison.OrdinalIgnoreCase)
-                ? updatedTable
-                : _tables[index].Source;
-            _tables[index] = new TableCard(source, IsCurrentTable(source.TableId));
+            var table = _tables[index];
+            var hasUpdatedSource = updatedTable is not null
+                && string.Equals(table.Source.TableId, updatedTable.TableId, StringComparison.OrdinalIgnoreCase);
+            var isPrevious = !string.IsNullOrWhiteSpace(previousTableId)
+                && string.Equals(table.Source.TableId, previousTableId, StringComparison.OrdinalIgnoreCase);
+            var isCurrent = !string.IsNullOrWhiteSpace(currentTableId)
+                && string.Equals(table.Source.TableId, currentTableId, StringComparison.OrdinalIgnoreCase);
+
+            if (!hasUpdatedSource && !isPrevious && !isCurrent)
+            {
+                continue;
+            }
+
+            if (hasUpdatedSource)
+            {
+                table.Update(updatedTable!, isCurrent);
+            }
+            else
+            {
+                table.SetCurrent(isCurrent);
+            }
         }
     }
 
@@ -842,8 +859,9 @@ public sealed class SalesPage : ContentPage
     {
         await RunAsync(async () =>
         {
+            var previousTableId = _currentTable?.TableId;
             _currentTable = table;
-            RefreshVisibleTableSelection();
+            RefreshVisibleTableSelection(previousTableId);
 
             var opened = await _api.OpenTableAsync(table.TableId);
             _currentOrder = opened.Order ?? await _api.GetOrderAsync(opened.OrderId);
@@ -1621,9 +1639,10 @@ public sealed class SalesPage : ContentPage
             CancelAutoKitchenTimer(_currentOrder.OrderId);
         }
 
+        var previousTableId = _currentTable?.TableId;
         _currentOrder = null;
         _currentTable = null;
-        RefreshVisibleTableSelection();
+        RefreshVisibleTableSelection(previousTableId);
         ApplyOrder();
     }
 
