@@ -15,6 +15,8 @@ using BKPos.Mobile.App.Platforms.iOS;
 using UIKit;
 #endif
 
+
+
 namespace BKPos.Mobile.App;
 
 public static class MauiProgram
@@ -71,6 +73,12 @@ public static class MauiProgram
 
 #if DEBUG
         builder.Logging.AddDebug();
+#endif
+
+#if ANDROID
+        OrientationService.Initialize(new AndroidOrientationService());
+#elif IOS
+        OrientationService.Initialize(new IosOrientationService());
 #endif
 
         return builder.Build();

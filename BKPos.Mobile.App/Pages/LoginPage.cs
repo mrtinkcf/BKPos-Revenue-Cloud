@@ -9,6 +9,7 @@ public sealed class LoginPage : ContentPage
     private readonly IHardwareIdProvider _hardwareIdProvider;
     private readonly MobileLoginSettings _loginSettings;
     private readonly MobilePrintSettings _printSettings;
+    private readonly MobileOrientationSettings _orientationSettings = new();
     private readonly Entry _username = AppUi.Entry("Tên đăng nhập");
     private readonly Entry _password = AppUi.Entry("Mật khẩu", password: true);
     private readonly CheckBox _remember = new() { Color = AppUi.Blue };
@@ -261,7 +262,7 @@ public sealed class LoginPage : ContentPage
 
             await _api.LoginAsync(username, password);
             await _loginSettings.SaveAsync(username, password, _remember.IsChecked, _autoLogin.IsChecked);
-            await Navigation.PushAsync(new SalesPage(_api, _loginSettings, _printSettings));
+            await NavigateAfterLoginAsync();
         }
         catch (Exception ex)
         {
@@ -270,6 +271,25 @@ public sealed class LoginPage : ContentPage
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private async Task NavigateAfterLoginAsync()
+    {
+        var (mode, _) = _orientationSettings.Load();
+        if (mode == MobileOrientationSettings.Landscape)
+        {
+            OrientationService.Current.LockLandscape();
+            await Navigation.PushAsync(new SalesPage(_api, _loginSettings, _printSettings));
+        }
+        else if (mode == MobileOrientationSettings.Portrait)
+        {
+            OrientationService.Current.LockPortrait();
+            await Navigation.PushAsync(new PortraitSalesPage(_api, _loginSettings, _printSettings, _orientationSettings));
+        }
+        else
+        {
+            await Navigation.PushAsync(new OrientationPickPage(_api, _loginSettings, _printSettings, _orientationSettings));
         }
     }
 

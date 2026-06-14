@@ -9,6 +9,7 @@ public sealed class SalesPage : ContentPage
     private readonly ApiClient _api;
     private readonly MobileLoginSettings _loginSettings;
     private readonly MobilePrintSettings _printSettings;
+    private readonly MobileOrientationSettings _orientationSettings;
     private readonly ObservableCollection<TableCard> _tables = [];
     private readonly ObservableCollection<ProductDto> _products = [];
     private readonly ObservableCollection<OrderLineCard> _lines = [];
@@ -47,11 +48,13 @@ public sealed class SalesPage : ContentPage
     private CancellationTokenSource? _tableRefreshDebounce;
     private bool _isBusy;
 
-    public SalesPage(ApiClient api, MobileLoginSettings loginSettings, MobilePrintSettings printSettings)
+    public SalesPage(ApiClient api, MobileLoginSettings loginSettings, MobilePrintSettings printSettings,
+        MobileOrientationSettings? orientationSettings = null)
     {
         _api = api;
         _loginSettings = loginSettings;
         _printSettings = printSettings;
+        _orientationSettings = orientationSettings ?? new MobileOrientationSettings();
         Shell.SetNavBarIsVisible(this, false);
         BackgroundColor = AppUi.Background;
         _tableList = BuildTableList();
@@ -101,6 +104,27 @@ public sealed class SalesPage : ContentPage
         _busy.Margin = new Thickness(0, 42, 18, 0);
         _busy.ZIndex = 11;
 
+        // Portrait toggle [↕] — top-left corner
+        var portraitToggle = new Label
+        {
+            Text = "↕",
+            TextColor = Colors.White,
+            FontSize = AppUi.S(20),
+            FontAttributes = FontAttributes.Bold,
+            HorizontalTextAlignment = TextAlignment.Center,
+            VerticalTextAlignment = TextAlignment.Center,
+            WidthRequest = AppUi.S(36),
+            HeightRequest = AppUi.S(36),
+            BackgroundColor = AppUi.Navy2,
+            HorizontalOptions = LayoutOptions.Start,
+            VerticalOptions = LayoutOptions.Start,
+            Margin = new Thickness(AppUi.S(6), AppUi.S(6), 0, 0),
+            ZIndex = 12
+        };
+        var ptTap = new TapGestureRecognizer();
+        ptTap.Tapped += async (_, _) => await SwitchToPortraitAsync();
+        portraitToggle.GestureRecognizers.Add(ptTap);
+
         var root = new Grid
         {
             RowDefinitions = { new RowDefinition(GridLength.Star) }
@@ -108,6 +132,7 @@ public sealed class SalesPage : ContentPage
         root.Add(body, 0, 0);
         root.Add(_busy, 0, 0);
         root.Add(logoutDrawer, 0, 0);
+        root.Add(portraitToggle, 0, 0);
         return root;
     }
 
@@ -1644,6 +1669,15 @@ public sealed class SalesPage : ContentPage
         _currentTable = null;
         RefreshVisibleTableSelection(previousTableId);
         ApplyOrder();
+    }
+
+    private async Task SwitchToPortraitAsync()
+    {
+        _orientationSettings.Save(MobileOrientationSettings.Portrait, _orientationSettings.Load().remember);
+        OrientationService.Current.LockPortrait();
+        var portrait = new PortraitSalesPage(_api, _loginSettings, _printSettings, _orientationSettings);
+        Navigation.InsertPageBefore(portrait, this);
+        await Navigation.PopAsync(false);
     }
 
     private async Task LogoutAsync()
