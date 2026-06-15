@@ -45,7 +45,7 @@
 	</PropertyGroup>
 
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-		<ApplicationVersion>12</ApplicationVersion>
+		<ApplicationVersion>13</ApplicationVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

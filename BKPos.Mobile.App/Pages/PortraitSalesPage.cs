@@ -86,8 +86,8 @@ public sealed class PortraitSalesPage : ContentPage
 
     // ── Tab bar labels ────────────────────────────────────────────────────
     private readonly Label _tabBanLabel = new() { Text = "Bàn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _tabDonLabel = new() { Text = "Đơn hàng", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
-    private readonly Label _tabMonLabel = new() { Text = "Món ăn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _tabDonLabel = new() { Text = "Món ăn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _tabMonLabel = new() { Text = "Hóa đơn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
     private readonly Border _tabBanBtn = null!;
     private readonly Border _tabDonBtn = null!;
     private readonly Border _tabMonBtn = null!;
@@ -181,22 +181,7 @@ public sealed class PortraitSalesPage : ContentPage
 
     private View BuildTopBar()
     {
-        // Logout drawer (top-left)
-        var logoutTrigger = new Label
-        {
-            Text = "≡",
-            TextColor = Colors.White,
-            FontSize = AppUi.S(22),
-            FontAttributes = FontAttributes.Bold,
-            HorizontalTextAlignment = TextAlignment.Center,
-            VerticalTextAlignment = TextAlignment.Center,
-            WidthRequest = AppUi.S(40)
-        };
-        var logoutTap = new TapGestureRecognizer();
-        logoutTap.Tapped += async (_, _) => await ConfirmLogoutAsync();
-        logoutTrigger.GestureRecognizers.Add(logoutTap);
-
-        // Landscape toggle (top-right)
+        // Landscape toggle (top-left)
         var landscapeToggle = new Label
         {
             Text = "↔",
@@ -211,6 +196,21 @@ public sealed class PortraitSalesPage : ContentPage
         landTap.Tapped += async (_, _) => await SwitchToLandscapeAsync();
         landscapeToggle.GestureRecognizers.Add(landTap);
 
+        // Logout (top-right)
+        var logoutTrigger = new Label
+        {
+            Text = "≡",
+            TextColor = Colors.White,
+            FontSize = AppUi.S(22),
+            FontAttributes = FontAttributes.Bold,
+            HorizontalTextAlignment = TextAlignment.Center,
+            VerticalTextAlignment = TextAlignment.Center,
+            WidthRequest = AppUi.S(40)
+        };
+        var logoutTap = new TapGestureRecognizer();
+        logoutTap.Tapped += async (_, _) => await ConfirmLogoutAsync();
+        logoutTrigger.GestureRecognizers.Add(logoutTap);
+
         var bar = new Grid
         {
             BackgroundColor = AppUi.Navy,
@@ -222,9 +222,9 @@ public sealed class PortraitSalesPage : ContentPage
                 new ColumnDefinition(GridLength.Auto)
             }
         };
-        bar.Add(logoutTrigger, 0, 0);
+        bar.Add(landscapeToggle, 0, 0);
         bar.Add(_headerTitle, 1, 0);
-        bar.Add(landscapeToggle, 2, 0);
+        bar.Add(logoutTrigger, 2, 0);
 
         return bar;
     }
@@ -261,8 +261,8 @@ public sealed class PortraitSalesPage : ContentPage
         }
 
         var ban = MakeTab(_tabBanLabel, "🗂", 0);
-        var don = MakeTab(_tabDonLabel, "📋", 1);
-        var mon = MakeTab(_tabMonLabel, "🍽", 2);
+        var don = MakeTab(_tabDonLabel, "🍽", 1);
+        var mon = MakeTab(_tabMonLabel, "📋", 2);
         return (ban, don, mon);
     }
 
@@ -758,9 +758,26 @@ public sealed class PortraitSalesPage : ContentPage
     {
         _activeTab = tab;
         if (_tablesPanel != null) _tablesPanel.IsVisible = tab == 0;
-        if (_orderPanel != null) _orderPanel.IsVisible = tab == 1;
-        if (_productsPanel != null) _productsPanel.IsVisible = tab == 2;
+        if (_productsPanel != null) _productsPanel.IsVisible = tab == 1;
+        if (_orderPanel != null) _orderPanel.IsVisible = tab == 2;
+        UpdateHeaderTitle();
         ApplyTabHighlight();
+    }
+
+    private void UpdateHeaderTitle()
+    {
+        if (_currentTable is null)
+        {
+            _headerTitle.Text = "BKPos Mobile";
+            return;
+        }
+
+        _headerTitle.Text = _activeTab switch
+        {
+            1 => $"Chọn món cho {_currentTable.TableName}",
+            2 => $"Hóa đơn {_currentTable.TableName}",
+            _ => "BKPos Mobile"
+        };
     }
 
     private void ApplyTabHighlight()
@@ -878,18 +895,18 @@ public sealed class PortraitSalesPage : ContentPage
         if (_currentOrder is null || _currentTable is null)
         {
             _tableTitle.Text = "Chưa chọn bàn";
-            _headerTitle.Text = "BKPos Mobile";
             _total.Text = "0 đ";
             UpdateProductQuantities();
+            UpdateHeaderTitle();
             return;
         }
 
         _tableTitle.Text = _currentTable.TableName;
-        _headerTitle.Text = _currentTable.TableName;
         foreach (var line in _currentOrder.Lines)
             _lines.Add(new OrderLineCard(line));
         _total.Text = AppUi.Money(_currentOrder.Total);
         UpdateProductQuantities();
+        UpdateHeaderTitle();
     }
 
     private async Task ApplyMutationResponseAsync(MutationResponseDto mutation)

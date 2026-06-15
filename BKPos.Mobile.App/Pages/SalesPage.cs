@@ -104,27 +104,6 @@ public sealed class SalesPage : ContentPage
         _busy.Margin = new Thickness(0, 42, 18, 0);
         _busy.ZIndex = 11;
 
-        // Portrait toggle [↕] — top-left corner
-        var portraitToggle = new Label
-        {
-            Text = "↕",
-            TextColor = Colors.White,
-            FontSize = AppUi.S(20),
-            FontAttributes = FontAttributes.Bold,
-            HorizontalTextAlignment = TextAlignment.Center,
-            VerticalTextAlignment = TextAlignment.Center,
-            WidthRequest = AppUi.S(36),
-            HeightRequest = AppUi.S(36),
-            BackgroundColor = AppUi.Navy2,
-            HorizontalOptions = LayoutOptions.Start,
-            VerticalOptions = LayoutOptions.Start,
-            Margin = new Thickness(AppUi.S(6), AppUi.S(6), 0, 0),
-            ZIndex = 12
-        };
-        var ptTap = new TapGestureRecognizer();
-        ptTap.Tapped += async (_, _) => await SwitchToPortraitAsync();
-        portraitToggle.GestureRecognizers.Add(ptTap);
-
         var root = new Grid
         {
             RowDefinitions = { new RowDefinition(GridLength.Star) }
@@ -132,7 +111,6 @@ public sealed class SalesPage : ContentPage
         root.Add(body, 0, 0);
         root.Add(_busy, 0, 0);
         root.Add(logoutDrawer, 0, 0);
-        root.Add(portraitToggle, 0, 0);
         return root;
     }
 
@@ -140,13 +118,16 @@ public sealed class SalesPage : ContentPage
     {
 #if IOS
         var toggleW = AppUi.S(20);
+        var portraitW = AppUi.S(38);
         var logoutW = AppUi.S(72);
         var h = AppUi.S(30);
 #else
         var toggleW = AppUi.S(32);
+        var portraitW = AppUi.S(52);
         var logoutW = AppUi.S(108);
         var h = AppUi.S(40);
 #endif
+        var actionW = portraitW + logoutW;
 
         var toggleArrow = new Label
         {
@@ -171,14 +152,23 @@ public sealed class SalesPage : ContentPage
             Content = toggleArrow
         };
 
-        var logoutText = new Label
+        var portraitSwitch = new Border
         {
-            Text = "Đăng xuất",
-            TextColor = Colors.White,
-            FontAttributes = FontAttributes.Bold,
-            FontSize = AppUi.S(10),
-            HorizontalTextAlignment = TextAlignment.Center,
-            VerticalTextAlignment = TextAlignment.Center
+            BackgroundColor = Color.FromArgb("#1E3A5F"),
+            StrokeThickness = 0,
+            IsVisible = false,
+            HeightRequest = h,
+            WidthRequest = portraitW,
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 0 },
+            Content = new Label
+            {
+                Text = "↕",
+                TextColor = Colors.White,
+                FontSize = AppUi.S(14),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
         };
 
         var logout = new Border
@@ -190,14 +180,22 @@ public sealed class SalesPage : ContentPage
             WidthRequest = logoutW,
             Padding = new Thickness(AppUi.S(4), 0),
             StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 0 },
-            Content = logoutText
+            Content = new Label
+            {
+                Text = "Đăng xuất",
+                TextColor = Colors.White,
+                FontAttributes = FontAttributes.Bold,
+                FontSize = AppUi.S(10),
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
         };
 
         var drawer = new Grid
         {
-            WidthRequest = toggleW + logoutW,
+            WidthRequest = toggleW + actionW,
             HeightRequest = h,
-            TranslationX = logoutW,
+            TranslationX = actionW,
             HorizontalOptions = LayoutOptions.End,
             VerticalOptions = LayoutOptions.Start,
             Margin = new Thickness(0, AppUi.S(64), 0, 0),
@@ -205,6 +203,7 @@ public sealed class SalesPage : ContentPage
             ColumnDefinitions =
             {
                 new ColumnDefinition(new GridLength(toggleW)),
+                new ColumnDefinition(new GridLength(portraitW)),
                 new ColumnDefinition(new GridLength(logoutW))
             },
             ColumnSpacing = 0
@@ -218,22 +217,30 @@ public sealed class SalesPage : ContentPage
             toggleArrow.Text = isOpen ? "›" : "‹";
             if (isOpen)
             {
+                portraitSwitch.IsVisible = true;
                 logout.IsVisible = true;
             }
 
-            await drawer.TranslateTo(isOpen ? 0 : logoutW, 0, 160, Easing.CubicOut);
+            await drawer.TranslateTo(isOpen ? 0 : actionW, 0, 160, Easing.CubicOut);
             if (!isOpen)
             {
+                portraitSwitch.IsVisible = false;
                 logout.IsVisible = false;
             }
         };
         toggle.GestureRecognizers.Add(tap);
+
+        var portraitTap = new TapGestureRecognizer();
+        portraitTap.Tapped += async (_, _) => await SwitchToPortraitAsync();
+        portraitSwitch.GestureRecognizers.Add(portraitTap);
+
         var logoutTap = new TapGestureRecognizer();
         logoutTap.Tapped += async (_, _) => await LogoutAsync();
         logout.GestureRecognizers.Add(logoutTap);
 
         drawer.Add(toggle, 0, 0);
-        drawer.Add(logout, 1, 0);
+        drawer.Add(portraitSwitch, 1, 0);
+        drawer.Add(logout, 2, 0);
         return drawer;
     }
 
