@@ -150,9 +150,9 @@ public sealed class LoginPage : ContentPage
             }
         }, 16);
 
-        card.WidthRequest = AppUi.S(430);
+        card.MaximumWidthRequest = AppUi.S(430);
         card.HorizontalOptions = LayoutOptions.Center;
-        card.VerticalOptions = LayoutOptions.Start;
+        card.VerticalOptions = LayoutOptions.Center;
 
         var root = new Grid
         {
