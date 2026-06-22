@@ -163,7 +163,7 @@ public sealed class LicensePage : ContentPage
             }
         }, 14);
 
-        card.WidthRequest = AppUi.S(520);
+        card.WidthRequest = Math.Min(AppUi.Scale * 360.0 - AppUi.S(28), AppUi.S(520));
         card.HorizontalOptions = LayoutOptions.Center;
         card.VerticalOptions = LayoutOptions.Start;
 

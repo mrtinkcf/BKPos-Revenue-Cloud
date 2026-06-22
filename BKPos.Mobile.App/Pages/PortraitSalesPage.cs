@@ -124,7 +124,7 @@ public sealed class PortraitSalesPage : ContentPage
 
         (_tabBanBtn, _tabDonBtn, _tabMonBtn) = BuildTabButtons();
 
-        Content = BuildContent();
+        Content = AppKeyboardHost.Wrap(BuildContent());
         ApplyTabHighlight();
     }
 

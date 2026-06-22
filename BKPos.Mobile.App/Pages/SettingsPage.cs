@@ -157,29 +157,35 @@ public sealed class SettingsPage : ContentPage
         return grid;
     }
 
-    private static HorizontalStackLayout CheckRow(CheckBox box, string text)
+    private static Grid CheckRow(CheckBox box, string text)
     {
         box.WidthRequest = AppUi.S(34);
         box.HeightRequest = AppUi.S(34);
         box.Scale = 0.8;
 
-        return new HorizontalStackLayout
+        var label = new Label
         {
-            Spacing = 6,
-            HeightRequest = AppUi.S(38),
-            Children =
-            {
-                box,
-                new Label
-                {
-                    Text = text,
-                    TextColor = AppUi.Ink,
-                    VerticalTextAlignment = TextAlignment.Center,
-                    FontSize = AppUi.S(13),
-                    FontAttributes = FontAttributes.Bold
-                }
-            }
+            Text = text,
+            TextColor = AppUi.Ink,
+            VerticalTextAlignment = TextAlignment.Center,
+            FontSize = AppUi.S(13),
+            FontAttributes = FontAttributes.Bold,
+            LineBreakMode = LineBreakMode.WordWrap
         };
+
+        var grid = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Auto),
+                new ColumnDefinition(GridLength.Star)
+            },
+            ColumnSpacing = 6,
+            HeightRequest = AppUi.S(38)
+        };
+        grid.Add(box, 0, 0);
+        grid.Add(label, 1, 0);
+        return grid;
     }
 
     private async Task SaveAsync()

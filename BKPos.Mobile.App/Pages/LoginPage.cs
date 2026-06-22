@@ -104,17 +104,15 @@ public sealed class LoginPage : ContentPage
         _exitButton.HeightRequest = AppUi.S(42);
         _busy.HorizontalOptions = LayoutOptions.Center;
 
-        var checksRow = new Grid
+        var checksRow = new VerticalStackLayout
         {
-            ColumnDefinitions =
+            Spacing = 4,
+            Children =
             {
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Star)
-            },
-            ColumnSpacing = 4
+                CheckRow(_remember, "Lưu thông tin đăng nhập"),
+                CheckRow(_autoLogin, "Tự động đăng nhập")
+            }
         };
-        checksRow.Add(CheckRow(_remember, "Lưu thông tin đăng nhập"), 0, 0);
-        checksRow.Add(CheckRow(_autoLogin, "Tự động đăng nhập"), 1, 0);
 
         var actionGrid = new Grid
         {
@@ -150,7 +148,9 @@ public sealed class LoginPage : ContentPage
             }
         }, 16);
 
-        card.MaximumWidthRequest = AppUi.S(430);
+        // WidthRequest = short side (portrait width) minus scrollview padding, capped at S(430)
+        // AppUi.Scale * 360 = device short side in dp (same value in both orientations)
+        card.WidthRequest = Math.Min(AppUi.Scale * 360.0 - AppUi.S(40), AppUi.S(430));
         card.HorizontalOptions = LayoutOptions.Center;
         card.VerticalOptions = LayoutOptions.Center;
 
@@ -177,7 +177,7 @@ public sealed class LoginPage : ContentPage
         return new()
         {
             Spacing = 6,
-            HeightRequest = AppUi.S(34),
+            HeightRequest = AppUi.S(38),
             Children =
             {
                 box,

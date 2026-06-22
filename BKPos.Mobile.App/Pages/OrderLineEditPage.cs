@@ -8,10 +8,11 @@ internal sealed class OrderLineEditPage : ContentPage
     private readonly Func<int, string, Task> _onSave;
     private readonly Func<Task> _onDelete;
     private readonly Entry _noteEntry;
-    private readonly Label _quantityLabel;
+    private readonly Entry _quantityEntry;
     private readonly Label _lineTotalLabel;
     private int _quantity;
     private bool _isBusy;
+    private bool _syncingQuantityText;
 
     public OrderLineEditPage(OrderLineCard line, Func<int, string, Task> onSave, Func<Task> onDelete)
     {
@@ -21,14 +22,20 @@ internal sealed class OrderLineEditPage : ContentPage
         _quantity = Math.Max(1, line.Source.Quantity);
         _noteEntry = AppUi.Entry("Ghi chú bếp/bar");
         _noteEntry.Text = line.Note;
-        _quantityLabel = new Label
+        _quantityEntry = new Entry
         {
             TextColor = AppUi.Ink,
             FontSize = AppUi.S(22),
             FontAttributes = FontAttributes.Bold,
             HorizontalTextAlignment = TextAlignment.Center,
-            VerticalTextAlignment = TextAlignment.Center
+            VerticalTextAlignment = TextAlignment.Center,
+            Keyboard = Keyboard.Numeric,
+            BackgroundColor = Colors.Transparent,
+            ClearButtonVisibility = ClearButtonVisibility.Never,
+            MaxLength = 4
         };
+        _quantityEntry.TextChanged += OnQuantityTextChanged;
+        _quantityEntry.Unfocused += (_, _) => CommitQuantityEntry();
         _lineTotalLabel = new Label
         {
             TextColor = AppUi.Blue,
@@ -122,7 +129,8 @@ internal sealed class OrderLineEditPage : ContentPage
             StrokeThickness = 1,
             HeightRequest = AppUi.S(44),
             StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 12 },
-            Content = _quantityLabel
+            Padding = new Thickness(8, 0),
+            Content = _quantityEntry
         };
         var quantityRow = new Grid
         {
@@ -170,6 +178,7 @@ internal sealed class OrderLineEditPage : ContentPage
         save.Clicked += async (_, _) => await SaveAsync();
         var actions = new Grid
         {
+            Margin = new Thickness(0, 2, 0, 4),
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
@@ -204,7 +213,11 @@ internal sealed class OrderLineEditPage : ContentPage
             }
         };
         root.Add(topBar, 0, 0);
-        root.Add(new Grid { Padding = new Thickness(12, 8), Children = { card } }, 0, 1);
+        root.Add(new ScrollView
+        {
+            Padding = new Thickness(12, 8, 12, 16),
+            Content = card
+        }, 0, 1);
         return root;
     }
 
@@ -223,14 +236,89 @@ internal sealed class OrderLineEditPage : ContentPage
 
     private void ChangeQuantity(int delta)
     {
+        CommitQuantityEntry();
         _quantity = Math.Max(1, _quantity + delta);
         UpdateQuantityLabels();
     }
 
     private void UpdateQuantityLabels()
     {
-        _quantityLabel.Text = _quantity.ToString();
+        var quantityText = _quantity.ToString();
+        if (_quantityEntry.Text != quantityText)
+        {
+            _syncingQuantityText = true;
+            _quantityEntry.Text = quantityText;
+            _syncingQuantityText = false;
+        }
+
         _lineTotalLabel.Text = "Thành tiền: " + AppUi.Money(_quantity * _line.Source.UnitPrice);
+    }
+
+    private void OnQuantityTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_syncingQuantityText)
+        {
+            return;
+        }
+
+        var text = e.NewTextValue ?? string.Empty;
+        if (text.Length == 0)
+        {
+            _lineTotalLabel.Text = "Thành tiền: " + AppUi.Money(_quantity * _line.Source.UnitPrice);
+            return;
+        }
+
+        var normalized = NormalizeQuantityText(text);
+        if (normalized != text)
+        {
+            _syncingQuantityText = true;
+            _quantityEntry.Text = normalized;
+            _syncingQuantityText = false;
+        }
+
+        if (TryReadQuantity(normalized, out var quantity))
+        {
+            _quantity = quantity;
+            _lineTotalLabel.Text = "Thành tiền: " + AppUi.Money(_quantity * _line.Source.UnitPrice);
+        }
+    }
+
+    private void CommitQuantityEntry()
+    {
+        if (!TryReadQuantity(_quantityEntry.Text ?? string.Empty, out var quantity))
+        {
+            quantity = Math.Max(1, _quantity);
+        }
+
+        _quantity = quantity;
+        UpdateQuantityLabels();
+    }
+
+    private static bool TryReadQuantity(string text, out int quantity)
+    {
+        if (int.TryParse(NormalizeQuantityText(text), out var value))
+        {
+            quantity = Math.Clamp(value, 1, 9999);
+            return true;
+        }
+
+        quantity = 1;
+        return false;
+    }
+
+    private static string NormalizeQuantityText(string text)
+    {
+        Span<char> buffer = stackalloc char[Math.Min(text.Length, 4)];
+        var count = 0;
+        foreach (var c in text)
+        {
+            if (char.IsDigit(c) && count < buffer.Length)
+            {
+                buffer[count++] = c;
+            }
+        }
+
+        return count == 0 ? string.Empty : new string(buffer[..count]);
     }
 
     private async Task SaveAsync()
@@ -243,6 +331,7 @@ internal sealed class OrderLineEditPage : ContentPage
         _isBusy = true;
         try
         {
+            CommitQuantityEntry();
             await _onSave(_quantity, (_noteEntry.Text ?? string.Empty).Trim());
             await Navigation.PopModalAsync();
         }
