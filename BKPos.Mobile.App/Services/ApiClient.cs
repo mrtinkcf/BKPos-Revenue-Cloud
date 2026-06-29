@@ -204,11 +204,26 @@ public sealed class ApiClient
             new PayOrderRequestDto(payments, discountAmount, idempotencyKey),
             cancellationToken: cancellationToken);
 
-    public async Task<PrintResponseDto> PrintOrderAsync(string orderId, string printType, CancellationToken cancellationToken = default)
+    public Task<PrintResponseDto> PrintOrderAsync(string orderId, string printType, CancellationToken cancellationToken = default)
+        => PrintOrderAsync(orderId, printType, force: false, cancellationToken);
+
+    public async Task<PrintResponseDto> PrintOrderAsync(string orderId, string printType, bool force, CancellationToken cancellationToken = default)
         => await SendAsync<PrintResponseDto>(
             HttpMethod.Post,
             $"/orders/{Uri.EscapeDataString(orderId)}/print/{Uri.EscapeDataString(printType)}",
-            new PrintOrderRequestDto(1),
+            new PrintOrderRequestDto(1, force),
+            cancellationToken: cancellationToken);
+
+    public async Task<IReadOnlyList<PrintedBillSummaryDto>> GetPrintedBillsTodayAsync(CancellationToken cancellationToken = default)
+        => (await SendAsync<PrintedBillsResponseDto>(
+            HttpMethod.Get,
+            "/printed-bills/today",
+            cancellationToken: cancellationToken)).Bills;
+
+    public async Task<PrintedBillDetailResponseDto> GetPrintedBillAsync(string orderId, CancellationToken cancellationToken = default)
+        => await SendAsync<PrintedBillDetailResponseDto>(
+            HttpMethod.Get,
+            $"/printed-bills/{Uri.EscapeDataString(orderId)}",
             cancellationToken: cancellationToken);
 
     public async Task<PrintersResponseDto> GetPrintersAsync(CancellationToken cancellationToken = default)
@@ -569,9 +584,34 @@ public sealed record PaymentResponseDto(
     IReadOnlyList<PaymentLineDto> Payments,
     string? IncomeWarning);
 
-public sealed record PrintOrderRequestDto(int Quantity);
+public sealed record PrintOrderRequestDto(int Quantity, bool Force = false);
 
 public sealed record PrintResponseDto(bool Ok, string JobId, string OrderId, string JobType, string Printer, bool Printed, bool Deduplicated, DateTimeOffset PrintedAt);
+
+public sealed record PrintedBillsResponseDto(IReadOnlyList<PrintedBillSummaryDto> Bills);
+
+public sealed record PrintedBillDetailResponseDto(PrintedBillSummaryDto Bill, IReadOnlyList<PrintedBillLineDto> Lines);
+
+public sealed record PrintedBillSummaryDto(
+    string OrderId,
+    string TableName,
+    decimal Discount,
+    decimal Total,
+    DateTime? StartTime,
+    DateTime? PaidAt,
+    DateTime? BusinessDate,
+    string CashierName);
+
+public sealed record PrintedBillLineDto(
+    string Id,
+    string OrderId,
+    string ProductId,
+    string ProductName,
+    int Quantity,
+    string UnitName,
+    decimal UnitPrice,
+    decimal LineTotal,
+    string? Note);
 
 public sealed record PrintersResponseDto(IReadOnlyList<PrinterRouteDto> Printers, IReadOnlyList<PrinterProfileDto> Profiles);
 

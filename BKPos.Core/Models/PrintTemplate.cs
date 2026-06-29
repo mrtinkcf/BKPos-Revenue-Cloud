@@ -50,6 +50,8 @@ public sealed class TemplateSection
 
     public bool ShowQty { get; set; } = true;
 
+    public bool ShowUnit { get; set; }
+
     public bool ShowNote { get; set; } = true;
 
     public bool ShowTableHeader { get; set; } = true;

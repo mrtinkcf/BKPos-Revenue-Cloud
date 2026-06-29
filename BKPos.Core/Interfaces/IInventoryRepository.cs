@@ -6,6 +6,16 @@ public interface IInventoryRepository
 {
     IReadOnlyList<InventoryStockItem> GetStockItems();
 
+    IReadOnlyList<InventoryDailyMovement> GetDailyMovements(DateTime month);
+
+    IReadOnlyList<InventoryTodayStockSummary> GetTodayStockSummary(DateTime date);
+
+    IReadOnlyList<InventoryRecipeLine> GetAllRecipeLines();
+
+    IReadOnlyList<InventoryRecipeLine> GetRecipeLines(string dishProductExternalId);
+
+    void SaveRecipe(string dishProductExternalId, IReadOnlyList<InventoryRecipeLine> lines, string userExternalId);
+
     IReadOnlyList<InventoryDocumentSummary> GetDocuments(int take = 100);
 
     InventoryDocument? GetDocument(string externalId);

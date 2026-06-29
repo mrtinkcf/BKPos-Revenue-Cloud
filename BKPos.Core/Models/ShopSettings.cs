@@ -11,7 +11,9 @@ public sealed class ShopSettings
 
     // Bán hàng
     public bool AutoPrintAfterPayment { get; set; } = false;
+    public bool PhoneOrderEnabled { get; set; } = false;
     public bool InventoryManagementEnabled { get; set; } = false;
+    public bool AllowNegativeInventorySale { get; set; } = true;
     public decimal VatPercent { get; set; } = 0;
     public string DefaultGuestName { get; set; } = "Khách lẻ";
 

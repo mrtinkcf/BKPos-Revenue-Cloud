@@ -18,6 +18,8 @@ public sealed class Product
 
     public string UnitName { get; set; } = string.Empty;
 
+    public bool UnitAllowsDecimalQuantity { get; set; }
+
     public decimal Price { get; set; }
 
     public string PriceDisplay => BKPos.Core.Formatting.MoneyFormatter.FormatCurrency(Price);

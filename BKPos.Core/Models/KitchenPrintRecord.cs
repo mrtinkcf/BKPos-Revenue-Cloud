@@ -8,7 +8,7 @@ public sealed class KitchenPrintRecord
 
     public string ProductId { get; set; } = string.Empty;
 
-    public int Quantity { get; set; }
+    public decimal Quantity { get; set; }
 
     public string UserExternalId { get; set; } = string.Empty;
 

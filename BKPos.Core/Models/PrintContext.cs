@@ -51,7 +51,9 @@ public sealed class PrintLineItem
 
     public string ProductName { get; set; } = string.Empty;
 
-    public int Qty { get; set; }
+    public string UnitName { get; set; } = string.Empty;
+
+    public decimal Qty { get; set; }
 
     public decimal UnitPrice { get; set; }
 

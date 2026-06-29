@@ -158,6 +158,71 @@ internal static class AppUi
         return NormalizeSearch(value).Contains(NormalizeSearch(keyword), StringComparison.OrdinalIgnoreCase);
     }
 
+    public static bool MatchesProductSearch(string productName, string keyword)
+        => ProductSearchScore(productName, keyword) >= 0;
+
+    public static int ProductSearchScore(string productName, string keyword)
+    {
+        var needle = NormalizeSearchPhrase(keyword);
+        if (string.IsNullOrWhiteSpace(needle))
+        {
+            return 0;
+        }
+
+        var haystack = NormalizeSearchPhrase(productName);
+        if (string.IsNullOrWhiteSpace(haystack))
+        {
+            return -1;
+        }
+
+        if (haystack.Equals(needle, StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        if (haystack.StartsWith(needle, StringComparison.Ordinal)
+            || haystack.Contains(" " + needle, StringComparison.Ordinal))
+        {
+            return 1;
+        }
+
+        var haystackTokens = haystack.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var needleTokens = needle.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (needleTokens.Length > 0
+            && needleTokens.All(query => haystackTokens.Any(token => token.StartsWith(query, StringComparison.Ordinal))))
+        {
+            return 2;
+        }
+
+        // Cho phép tìm giữa từ khi người dùng nhập đủ dài, ví dụ "ken" tìm "Heineken".
+        return needle.Length >= 3 && haystack.Contains(needle, StringComparison.Ordinal) ? 3 : -1;
+    }
+
+    private static string NormalizeSearchPhrase(string value)
+    {
+        var normalized = NormalizeSearch(value).ToLowerInvariant();
+        var builder = new StringBuilder(normalized.Length);
+        var lastWasSpace = true;
+
+        foreach (var ch in normalized)
+        {
+            if (char.IsLetterOrDigit(ch))
+            {
+                builder.Append(ch);
+                lastWasSpace = false;
+                continue;
+            }
+
+            if (!lastWasSpace)
+            {
+                builder.Append(' ');
+                lastWasSpace = true;
+            }
+        }
+
+        return builder.ToString().Trim();
+    }
+
     public static string NormalizeSearch(string value)
     {
         var normalized = (value ?? string.Empty).Normalize(NormalizationForm.FormD);
@@ -311,4 +376,26 @@ internal sealed class OrderLineCard
     public bool HasKitchenPrint { get; }
     public string KitchenPrintStatus { get; }
     public Color KitchenPrintStatusColor { get; }
+}
+
+internal sealed class PrintedBillCard
+{
+    public PrintedBillCard(PrintedBillSummaryDto source)
+    {
+        Source = source;
+        TableName = string.IsNullOrWhiteSpace(source.TableName) ? "Mang về" : source.TableName.Trim();
+        PaidAtText = source.PaidAt?.ToString("HH:mm dd/MM") ?? source.BusinessDate?.ToString("dd/MM/yyyy") ?? string.Empty;
+        CashierText = string.IsNullOrWhiteSpace(source.CashierName) ? "Thu ngân: -" : $"Thu ngân: {source.CashierName}";
+        TotalText = AppUi.Money(source.Total);
+        DiscountText = source.Discount > 0 ? "Giảm giá: " + AppUi.Money(source.Discount) : string.Empty;
+        HasDiscount = source.Discount > 0;
+    }
+
+    public PrintedBillSummaryDto Source { get; }
+    public string TableName { get; }
+    public string PaidAtText { get; }
+    public string CashierText { get; }
+    public string TotalText { get; }
+    public string DiscountText { get; }
+    public bool HasDiscount { get; }
 }

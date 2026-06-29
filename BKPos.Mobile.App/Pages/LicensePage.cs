@@ -3,6 +3,7 @@ using System.Text;
 using BKPos.Core.Interfaces;
 using BKPos.Mobile.App.Services;
 using Microsoft.Maui.ApplicationModel.DataTransfer;
+using Microsoft.Maui.Controls.Shapes;
 
 namespace BKPos.Mobile.App.Pages;
 
@@ -13,14 +14,32 @@ public sealed class LicensePage : ContentPage
 
     private readonly ApiClient _api;
     private readonly IHardwareIdProvider _hardwareIdProvider;
-    private readonly Entry _hardwareId = AppUi.Entry("ID máy");
+    private readonly Label _hardwareId = new()
+    {
+        TextColor = AppUi.Ink,
+        FontSize = AppUi.S(13),
+        FontAttributes = FontAttributes.Bold,
+        LineBreakMode = LineBreakMode.WordWrap,
+        VerticalTextAlignment = TextAlignment.Center
+    };
     private readonly Entry _licenseKey = AppUi.Entry("Key bản quyền BKP3");
-    private readonly Entry _sellerPassword = AppUi.Entry("Mật khẩu quản trị", password: true);
     private readonly ActivityIndicator _busy = new() { Color = AppUi.Blue, IsVisible = false };
-    private readonly Button _requestButton = AppUi.NavyButton("Gửi yêu cầu");
-    private readonly Button _checkRequestButton = AppUi.SecondaryButton("Kiểm tra duyệt");
-    private readonly Button _claimButton = AppUi.SecondaryButton("Kích hoạt tự động");
-    private readonly Button _activateButton = AppUi.PrimaryButton("Kích hoạt");
+
+    // Border-based buttons: tránh góc trắng Android và lỗi bàn phím bấm 2 lần
+    private Border? _requestBorder;
+    private Label? _requestLabel;
+    private Border? _claimBorder;
+    private Label? _claimLabel;
+    private Border? _manualBorder;
+    private Border? _activateBorder;
+
+    private Entry? _popupPasswordEntry;
+    private Label? _popupEyeLabel;
+    private Grid? _popupOverlay;
+    private Grid? _manualOverlay;
+    private Func<Task>? _pendingPopupAction;
+    private bool _hasPendingRequest;
+    private bool _popupPasswordVisible;
 
     public LicensePage(ApiClient api, IHardwareIdProvider hardwareIdProvider)
     {
@@ -29,7 +48,6 @@ public sealed class LicensePage : ContentPage
         Title = "Bản quyền";
         BackgroundColor = AppUi.Background;
         Shell.SetNavBarIsVisible(this, false);
-        _hardwareId.IsReadOnly = true;
         Content = AppKeyboardHost.Wrap(BuildContent());
     }
 
@@ -39,6 +57,7 @@ public sealed class LicensePage : ContentPage
         try
         {
             _hardwareId.Text = _hardwareIdProvider.GetHardwareId();
+            _ = RefreshRequestStateAsync();
         }
         catch (Exception ex)
         {
@@ -48,10 +67,47 @@ public sealed class LicensePage : ContentPage
 
     private View BuildContent()
     {
-        _requestButton.Clicked += async (_, _) => await SubmitRequestAsync();
-        _checkRequestButton.Clicked += async (_, _) => await CheckRequestAsync();
-        _claimButton.Clicked += async (_, _) => await ClaimAsync();
-        _activateButton.Clicked += async (_, _) => await ActivateAsync();
+        // Border + TapGestureRecognizer: không bị Android trắng góc, không bị bàn phím chặn lần đầu
+        static (Border btn, Label lbl) Btn(string text, Color bg, Color fg, Func<Task> onTap)
+        {
+            var lbl = new Label
+            {
+                Text = text,
+                TextColor = fg,
+                FontSize = AppUi.S(13),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center,
+                LineBreakMode = LineBreakMode.NoWrap
+            };
+            var btn = new Border
+            {
+                BackgroundColor = bg,
+                StrokeThickness = 0,
+                HeightRequest = AppUi.S(42),
+                StrokeShape = new RoundRectangle { CornerRadius = 8 },
+                Content = lbl,
+                HorizontalOptions = LayoutOptions.Fill
+            };
+            var tap = new TapGestureRecognizer();
+            tap.Tapped += async (_, _) => await onTap();
+            btn.GestureRecognizers.Add(tap);
+            return (btn, lbl);
+        }
+
+        (_requestBorder, _requestLabel) = Btn("Gửi yêu cầu kích hoạt", AppUi.Navy, Colors.White, () =>
+        {
+            if (!_hasPendingRequest)
+                ShowPasswordPopup(SubmitRequestAsync);
+            return Task.CompletedTask;
+        });
+
+        // Kích hoạt tự động: xanh lá, sáng khi đã gửi yêu cầu, mờ khi chưa
+        (_claimBorder, _claimLabel) = Btn("Kích hoạt tự động",
+            Color.FromArgb("#DCFCE7"), Color.FromArgb("#16A34A"), AutoActivateAsync);
+
+        // Kích hoạt thủ công: mở popup nhập key, không nhét textbox vào form chính.
+        (_manualBorder, _) = Btn("Kích hoạt thủ công", AppUi.Blue, Colors.White, ShowManualPopupCore);
 
         var backTap = new TapGestureRecognizer();
         backTap.Tapped += async (_, _) => await Navigation.PopAsync();
@@ -88,19 +144,28 @@ public sealed class LicensePage : ContentPage
 
         var copyHardware = new Button
         {
-            Text = "Copy",
+            Text = "⧉",
             BackgroundColor = AppUi.BlueSoft,
             TextColor = AppUi.Blue,
             FontAttributes = FontAttributes.Bold,
-            FontSize = 12,
+            FontSize = 18,
             HeightRequest = AppUi.S(40),
-            WidthRequest = AppUi.S(64),
+            WidthRequest = AppUi.S(46),
             CornerRadius = 10,
-            Padding = new Thickness(8, 0)
+            Padding = 0
         };
         copyHardware.Clicked += async (_, _) => await CopyHardwareIdAsync();
 
-        _hardwareId.HeightRequest = AppUi.S(40);
+        var hardwareBox = new Border
+        {
+            BackgroundColor = AppUi.SurfaceAlt,
+            Stroke = AppUi.Border,
+            StrokeThickness = 1,
+            Padding = new Thickness(AppUi.S(12), AppUi.S(8)),
+            StrokeShape = new RoundRectangle { CornerRadius = 10 },
+            Content = _hardwareId
+        };
+
         var hardwareRow = new Grid
         {
             ColumnDefinitions =
@@ -110,55 +175,21 @@ public sealed class LicensePage : ContentPage
             },
             ColumnSpacing = 8
         };
-        hardwareRow.Add(_hardwareId, 0, 0);
+        hardwareRow.Add(hardwareBox, 0, 0);
         hardwareRow.Add(copyHardware, 1, 0);
-
-        _sellerPassword.HeightRequest = AppUi.S(40);
-        _requestButton.HeightRequest = AppUi.S(40);
-        _checkRequestButton.HeightRequest = AppUi.S(40);
-        var requestButtons = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Star)
-            },
-            ColumnSpacing = 10
-        };
-        requestButtons.Add(_requestButton, 0, 0);
-        requestButtons.Add(_checkRequestButton, 1, 0);
-
-        _licenseKey.HeightRequest = AppUi.S(40);
-        _claimButton.HeightRequest = AppUi.S(40);
-        _activateButton.HeightRequest = AppUi.S(40);
-        var activateButtons = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(GridLength.Star),
-                new ColumnDefinition(GridLength.Star)
-            },
-            ColumnSpacing = 10
-        };
-        activateButtons.Add(_claimButton, 0, 0);
-        activateButtons.Add(_activateButton, 1, 0);
 
         _busy.HorizontalOptions = LayoutOptions.Center;
 
         var card = AppUi.CardView(new VerticalStackLayout
         {
-            Spacing = 8,
+            Spacing = AppUi.S(10),
             Children =
             {
                 new Label { Text = "ID máy (chỉ đọc)", TextColor = AppUi.Muted, FontSize = 12, FontAttributes = FontAttributes.Bold },
                 hardwareRow,
-                new Label { Text = "Yêu cầu cấp tự động", TextColor = AppUi.Muted, FontSize = 12, FontAttributes = FontAttributes.Bold },
-                new Label { Text = SellerOnlyMessage, TextColor = AppUi.Blue, FontSize = 11, LineBreakMode = LineBreakMode.WordWrap },
-                _sellerPassword,
-                requestButtons,
-                new Label { Text = "Key bản quyền", TextColor = AppUi.Muted, FontSize = 12, FontAttributes = FontAttributes.Bold },
-                _licenseKey,
-                activateButtons,
+                _requestBorder!,
+                _claimBorder!,
+                _manualBorder!,
                 _busy
             }
         }, 14);
@@ -177,7 +208,425 @@ public sealed class LicensePage : ContentPage
         };
         root.Add(topBar, 0, 0);
         root.Add(new ScrollView { Padding = new Thickness(AppUi.S(14), AppUi.S(10)), Content = card }, 0, 1);
+
+        _popupOverlay = BuildPasswordPopupOverlay();
+        _popupOverlay.IsVisible = false;
+        _popupOverlay.ZIndex = 20;
+        root.Add(_popupOverlay, 0, 0);
+        Grid.SetRowSpan(_popupOverlay, 2);
+
+        _manualOverlay = BuildManualActivationPopupOverlay();
+        _manualOverlay.IsVisible = false;
+        _manualOverlay.ZIndex = 21;
+        root.Add(_manualOverlay, 0, 0);
+        Grid.SetRowSpan(_manualOverlay, 2);
+
         return root;
+    }
+
+    private Grid BuildPasswordPopupOverlay()
+    {
+        _popupPasswordEntry = new Entry
+        {
+            Placeholder = "Mật khẩu quản trị",
+            IsPassword = true,
+            BackgroundColor = AppUi.SurfaceAlt,
+            TextColor = AppUi.Ink,
+            PlaceholderColor = AppUi.Muted,
+            ReturnType = ReturnType.Done,
+            HeightRequest = AppUi.S(40)
+        };
+        _popupPasswordEntry.Completed += async (_, _) => await ConfirmPasswordAsync();
+
+        _popupEyeLabel = new Label
+        {
+            Text = "👁",
+            FontSize = AppUi.S(16),
+            HorizontalTextAlignment = TextAlignment.Center,
+            VerticalTextAlignment = TextAlignment.Center,
+            TextColor = AppUi.Blue,
+            InputTransparent = true
+        };
+        var eyeBtn = new Border
+        {
+            BackgroundColor = AppUi.BlueSoft,
+            StrokeThickness = 0,
+            WidthRequest = AppUi.S(40),
+            HeightRequest = AppUi.S(40),
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            Content = _popupEyeLabel
+        };
+        var eyeTap = new TapGestureRecognizer();
+        eyeTap.Tapped += (_, _) =>
+        {
+            SetPopupPasswordVisible(!_popupPasswordVisible);
+        };
+        eyeBtn.GestureRecognizers.Add(eyeTap);
+
+        var entryRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto)
+            },
+            ColumnSpacing = 6
+        };
+        entryRow.Add(_popupPasswordEntry, 0, 0);
+        entryRow.Add(eyeBtn, 1, 0);
+
+        // Popup buttons cũng dùng Border+tap để fix lỗi bàn phím bấm 2 lần
+        var cancelBorder = new Border
+        {
+            BackgroundColor = AppUi.Surface,
+            Stroke = AppUi.Border,
+            StrokeThickness = 1,
+            HeightRequest = AppUi.S(40),
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            HorizontalOptions = LayoutOptions.Fill,
+            Content = new Label
+            {
+                Text = "Hủy",
+                TextColor = AppUi.Ink,
+                FontSize = AppUi.S(13),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
+        };
+        var cancelTap = new TapGestureRecognizer();
+        cancelTap.Tapped += (_, _) => HidePasswordPopup();
+        cancelBorder.GestureRecognizers.Add(cancelTap);
+
+        var confirmBorder = new Border
+        {
+            BackgroundColor = AppUi.Blue,
+            StrokeThickness = 0,
+            HeightRequest = AppUi.S(40),
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            HorizontalOptions = LayoutOptions.Fill,
+            Content = new Label
+            {
+                Text = "Xác nhận",
+                TextColor = Colors.White,
+                FontSize = AppUi.S(13),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
+        };
+        var confirmTap = new TapGestureRecognizer();
+        confirmTap.Tapped += async (_, _) => await ConfirmPasswordAsync();
+        confirmBorder.GestureRecognizers.Add(confirmTap);
+
+        var btnRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            ColumnSpacing = 8
+        };
+        btnRow.Add(cancelBorder, 0, 0);
+        btnRow.Add(confirmBorder, 1, 0);
+
+        var popupCard = AppUi.CardView(new VerticalStackLayout
+        {
+            Spacing = AppUi.S(12),
+            Children =
+            {
+                new Label
+                {
+                    Text = "Nhập mật khẩu quản trị",
+                    TextColor = AppUi.Navy,
+                    FontSize = AppUi.S(15),
+                    FontAttributes = FontAttributes.Bold
+                },
+                entryRow,
+                btnRow
+            }
+        }, 16);
+
+        popupCard.WidthRequest = Math.Min(AppUi.Scale * 360.0 - AppUi.S(28), AppUi.S(320));
+        popupCard.HorizontalOptions = LayoutOptions.Center;
+        popupCard.VerticalOptions = LayoutOptions.Center;
+
+        var dimOverlay = new BoxView
+        {
+            BackgroundColor = Color.FromRgba(0, 0, 0, 0.45),
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill
+        };
+        var dimTap = new TapGestureRecognizer();
+        dimTap.Tapped += (_, _) => HidePasswordPopup();
+        dimOverlay.GestureRecognizers.Add(dimTap);
+
+        return new Grid
+        {
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill,
+            Children = { dimOverlay, popupCard }
+        };
+    }
+
+    private Grid BuildManualActivationPopupOverlay()
+    {
+        _licenseKey.HeightRequest = AppUi.S(40);
+        _licenseKey.ReturnType = ReturnType.Done;
+        _licenseKey.Completed += async (_, _) => await ActivateFromManualPopupAsync();
+
+        var cancelBorder = new Border
+        {
+            BackgroundColor = AppUi.Surface,
+            Stroke = AppUi.Border,
+            StrokeThickness = 1,
+            HeightRequest = AppUi.S(40),
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            HorizontalOptions = LayoutOptions.Fill,
+            Content = new Label
+            {
+                Text = "Hủy",
+                TextColor = AppUi.Ink,
+                FontSize = AppUi.S(13),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
+        };
+        var cancelTap = new TapGestureRecognizer();
+        cancelTap.Tapped += (_, _) => HideManualPopup();
+        cancelBorder.GestureRecognizers.Add(cancelTap);
+
+        _activateBorder = new Border
+        {
+            BackgroundColor = AppUi.Blue,
+            StrokeThickness = 0,
+            HeightRequest = AppUi.S(40),
+            StrokeShape = new RoundRectangle { CornerRadius = 8 },
+            HorizontalOptions = LayoutOptions.Fill,
+            Content = new Label
+            {
+                Text = "Kích hoạt",
+                TextColor = Colors.White,
+                FontSize = AppUi.S(13),
+                FontAttributes = FontAttributes.Bold,
+                HorizontalTextAlignment = TextAlignment.Center,
+                VerticalTextAlignment = TextAlignment.Center
+            }
+        };
+        var activateTap = new TapGestureRecognizer();
+        activateTap.Tapped += async (_, _) => await ActivateFromManualPopupAsync();
+        _activateBorder.GestureRecognizers.Add(activateTap);
+
+        var btnRow = new Grid
+        {
+            ColumnDefinitions =
+            {
+                new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star)
+            },
+            ColumnSpacing = 8
+        };
+        btnRow.Add(cancelBorder, 0, 0);
+        btnRow.Add(_activateBorder, 1, 0);
+
+        var popupCard = AppUi.CardView(new VerticalStackLayout
+        {
+            Spacing = AppUi.S(12),
+            Children =
+            {
+                new Label
+                {
+                    Text = "Kích hoạt thủ công",
+                    TextColor = AppUi.Navy,
+                    FontSize = AppUi.S(15),
+                    FontAttributes = FontAttributes.Bold
+                },
+                new Label
+                {
+                    Text = "Dán key bản quyền rồi bấm Kích hoạt.",
+                    TextColor = AppUi.Muted,
+                    FontSize = AppUi.S(12)
+                },
+                _licenseKey,
+                btnRow
+            }
+        }, 16);
+
+        popupCard.WidthRequest = Math.Min(AppUi.Scale * 360.0 - AppUi.S(28), AppUi.S(340));
+        popupCard.HorizontalOptions = LayoutOptions.Center;
+        popupCard.VerticalOptions = LayoutOptions.Center;
+
+        var dimOverlay = new BoxView
+        {
+            BackgroundColor = Color.FromRgba(0, 0, 0, 0.45),
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill
+        };
+        var dimTap = new TapGestureRecognizer();
+        dimTap.Tapped += (_, _) => HideManualPopup();
+        dimOverlay.GestureRecognizers.Add(dimTap);
+
+        return new Grid
+        {
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill,
+            Children = { dimOverlay, popupCard }
+        };
+    }
+
+    private void ShowPasswordPopup(Func<Task> onSuccess)
+    {
+        _pendingPopupAction = onSuccess;
+        if (_popupPasswordEntry is not null)
+        {
+            _popupPasswordEntry.Text = string.Empty;
+        }
+        SetPopupPasswordVisible(false);
+        if (_popupOverlay is not null)
+            _popupOverlay.IsVisible = true;
+        Dispatcher.Dispatch(() =>
+        {
+            SetPopupPasswordVisible(false);
+            _popupPasswordEntry?.Focus();
+        });
+    }
+
+    private void HidePasswordPopup()
+    {
+        if (_popupOverlay is not null)
+            _popupOverlay.IsVisible = false;
+        if (_popupPasswordEntry is not null)
+            _popupPasswordEntry.Text = string.Empty;
+        SetPopupPasswordVisible(false);
+        _pendingPopupAction = null;
+    }
+
+    private void SetPopupPasswordVisible(bool visible)
+    {
+        _popupPasswordVisible = visible;
+
+        if (_popupPasswordEntry is not null)
+        {
+            _popupPasswordEntry.IsPassword = !visible;
+            ApplyNativePopupPasswordState(visible);
+        }
+
+        if (_popupEyeLabel is not null)
+        {
+            _popupEyeLabel.Text = visible ? "🙈" : "👁";
+        }
+    }
+
+    private void ApplyNativePopupPasswordState(bool visible)
+    {
+        if (_popupPasswordEntry is null)
+        {
+            return;
+        }
+
+#if ANDROID
+        if (_popupPasswordEntry.Handler?.PlatformView is Android.Widget.EditText editText)
+        {
+            editText.InputType = visible
+                ? Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextVariationVisiblePassword
+                : Android.Text.InputTypes.ClassText | Android.Text.InputTypes.TextVariationPassword | Android.Text.InputTypes.TextFlagNoSuggestions;
+            editText.TransformationMethod = visible ? null : Android.Text.Method.PasswordTransformationMethod.Instance;
+            editText.ShowSoftInputOnFocus = false;
+            editText.SetSelection(editText.Text?.Length ?? 0);
+        }
+#elif IOS
+        if (_popupPasswordEntry.Handler?.PlatformView is UIKit.UITextField textField)
+        {
+            textField.SecureTextEntry = !visible;
+        }
+#endif
+    }
+
+    private async Task ConfirmPasswordAsync()
+    {
+        if (!IsSellerPasswordValid(_popupPasswordEntry?.Text))
+        {
+            await DisplayAlert("Không đủ quyền", SellerOnlyMessage, "OK");
+            return;
+        }
+
+        var action = _pendingPopupAction;
+        HidePasswordPopup();
+        if (action is not null)
+            await action();
+    }
+
+    private Task ShowManualPopupCore()
+    {
+        if (_manualOverlay is not null)
+            _manualOverlay.IsVisible = true;
+        Dispatcher.Dispatch(() => _licenseKey.Focus());
+        return Task.CompletedTask;
+    }
+
+    private void HideManualPopup()
+    {
+        if (_manualOverlay is not null)
+            _manualOverlay.IsVisible = false;
+    }
+
+    private async Task ActivateFromManualPopupAsync()
+    {
+        await ActivateAsync();
+    }
+
+    private async Task RefreshRequestStateAsync()
+    {
+        _hasPendingRequest = await MobileLicenseRequestStore.LoadAsync() is not null;
+        ApplyRequestUi(false);
+    }
+
+    private void ApplyRequestUi(bool busy)
+    {
+        _busy.IsVisible = busy;
+        _busy.IsRunning = busy;
+
+        // Nút gửi yêu cầu
+        if (_requestLabel is not null)
+            _requestLabel.Text = _hasPendingRequest ? "Đã gửi yêu cầu" : "Gửi yêu cầu kích hoạt";
+        if (_requestBorder is not null)
+        {
+            _requestBorder.BackgroundColor = _hasPendingRequest ? AppUi.Border : AppUi.Navy;
+            _requestBorder.InputTransparent = busy || _hasPendingRequest;
+            _requestBorder.Opacity = busy ? 0.55 : 1.0;
+        }
+        if (_requestLabel is not null)
+            _requestLabel.TextColor = _hasPendingRequest ? AppUi.Muted : Colors.White;
+
+        // Kích hoạt tự động: xanh lá sáng khi đã gửi yêu cầu, mờ khi chưa
+        if (_claimBorder is not null)
+        {
+            _claimBorder.BackgroundColor = _hasPendingRequest
+                ? Color.FromArgb("#16A34A")
+                : Color.FromArgb("#DCFCE7");
+            _claimBorder.InputTransparent = busy;
+            _claimBorder.Opacity = busy ? 0.55 : 1.0;
+        }
+        if (_claimLabel is not null)
+            _claimLabel.TextColor = _hasPendingRequest ? Colors.White : Color.FromArgb("#16A34A");
+
+        // Kích hoạt thủ công
+        if (_manualBorder is not null)
+        {
+            _manualBorder.InputTransparent = busy;
+            _manualBorder.Opacity = busy ? 0.55 : 1.0;
+        }
+
+        // Kích hoạt (manual panel)
+        if (_activateBorder is not null)
+        {
+            _activateBorder.InputTransparent = busy;
+            _activateBorder.Opacity = busy ? 0.55 : 1.0;
+        }
+
+        _licenseKey.IsEnabled = !busy;
     }
 
     private async Task CopyHardwareIdAsync()
@@ -199,12 +648,6 @@ public sealed class LicensePage : ContentPage
         if (string.IsNullOrWhiteSpace(hardwareId))
         {
             await DisplayAlert("Chưa có ID máy", "Không lấy được ID máy để gửi yêu cầu.", "OK");
-            return;
-        }
-
-        if (!IsSellerPasswordValid(_sellerPassword.Text))
-        {
-            await DisplayAlert("Không đủ quyền", SellerOnlyMessage, "OK");
             return;
         }
 
@@ -231,9 +674,11 @@ public sealed class LicensePage : ContentPage
             }
 
             await MobileLicenseRequestStore.SaveAsync(result.Request.RequestId, result.RequestSecret, result.Request.ProductType);
+            _hasPendingRequest = true;
+            ApplyRequestUi(false);
             await DisplayAlert(
                 "Đã gửi yêu cầu",
-                $"Mã yêu cầu: {result.Request.RequestId}\nSau khi admin duyệt trên BKPos.KeyGen, bấm Kiểm tra duyệt.",
+                $"Mã yêu cầu: {result.Request.RequestId}\nSau khi admin duyệt trên BKPos.KeyGen, bấm Kích hoạt tự động.",
                 "OK");
         }
         catch (Exception ex)
@@ -242,9 +687,19 @@ public sealed class LicensePage : ContentPage
         }
         finally
         {
-            _sellerPassword.Text = string.Empty;
             SetBusy(false);
         }
+    }
+
+    private async Task AutoActivateAsync()
+    {
+        if (await MobileLicenseRequestStore.LoadAsync() is not null)
+        {
+            await CheckRequestAsync();
+            return;
+        }
+
+        await ClaimAsync();
     }
 
     private async Task CheckRequestAsync()
@@ -303,12 +758,15 @@ public sealed class LicensePage : ContentPage
             {
                 MobileActivationStore.MarkActivated(hardwareId, activated.License.LicenseId);
                 MobileLicenseRequestStore.Clear();
+                _hasPendingRequest = false;
+                ApplyRequestUi(false);
                 await DisplayAlert("Kích hoạt thành công", "Bản quyền mobile đã được kích hoạt.", "OK");
                 await Navigation.PopAsync();
                 return;
             }
 
             _licenseKey.Text = licenseKey;
+            await ShowManualPopupCore();
             await DisplayAlert("Chưa kích hoạt", activated.License.Message ?? activated.License.Status, "OK");
         }
         catch (Exception ex)
@@ -400,27 +858,16 @@ public sealed class LicensePage : ContentPage
         }
     }
 
-    private void SetBusy(bool busy)
-    {
-        _busy.IsVisible = busy;
-        _busy.IsRunning = busy;
-        _requestButton.IsEnabled = !busy;
-        _checkRequestButton.IsEnabled = !busy;
-        _claimButton.IsEnabled = !busy;
-        _activateButton.IsEnabled = !busy;
-        _licenseKey.IsEnabled = !busy;
-        _sellerPassword.IsEnabled = !busy;
-    }
+    private void SetBusy(bool busy) => ApplyRequestUi(busy);
 
     private static bool IsSellerPasswordValid(string? password)
     {
         if (string.IsNullOrEmpty(password))
-        {
             return false;
-        }
 
         var actual = SHA256.HashData(Encoding.UTF8.GetBytes(password));
         var expected = Convert.FromHexString(SellerPasswordSha256);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 }
+

@@ -11,7 +11,7 @@ public interface IOrderRepository
 
     void AddLine(OrderLine line);
 
-    void UpdateLineQuantity(string lineId, int newQty);
+    void UpdateLineQuantity(string lineId, decimal newQty);
 
     void UpdateLineNote(string lineId, string? note);
 

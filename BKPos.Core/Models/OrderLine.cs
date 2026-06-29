@@ -16,7 +16,7 @@ public sealed class OrderLine
 
     public int ProductType { get; set; } = ProductTypes.Drink;
 
-    public int Quantity { get; set; }
+    public decimal Quantity { get; set; }
 
     public string? Note { get; set; }
 

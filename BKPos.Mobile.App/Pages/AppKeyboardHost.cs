@@ -15,6 +15,7 @@ internal sealed class AppKeyboardHost : Grid
 {
     private readonly View _pageContent;
     private readonly Border _keyboardPanel;
+    private readonly BoxView _keyboardBackdrop;
     private readonly BoxView _dismissLayer;
     private readonly VerticalStackLayout _keyRows = new() { Spacing = 3 };
 
@@ -33,9 +34,14 @@ internal sealed class AppKeyboardHost : Grid
         RowDefinitions.Add(new RowDefinition(GridLength.Auto));
 
         Children.Add(pageContent);
+        AddTap(_pageContent, HandleDismissTap);
         _dismissLayer = BuildDismissLayer();
         Grid.SetRow(_dismissLayer, 0);
         Children.Add(_dismissLayer);
+
+        _keyboardBackdrop = BuildKeyboardBackdrop();
+        Grid.SetRow(_keyboardBackdrop, 1);
+        Children.Add(_keyboardBackdrop);
 
         _keyboardPanel = BuildKeyboardPanel();
         Grid.SetRow(_keyboardPanel, 1);
@@ -58,6 +64,13 @@ internal sealed class AppKeyboardHost : Grid
         AddTap(layer, HandleDismissTap);
         return layer;
     }
+
+    private static BoxView BuildKeyboardBackdrop() => new()
+    {
+        IsVisible = false,
+        InputTransparent = true,
+        BackgroundColor = Color.FromRgba(0, 0, 0, 0.45)
+    };
 
     private Border BuildKeyboardPanel()
     {
@@ -151,8 +164,9 @@ internal sealed class AppKeyboardHost : Grid
         _telexAllowed = AllowsTelex(entry);
         _telexEnabled = _telexAllowed;
         BuildKeys();
+        _keyboardBackdrop.IsVisible = true;
         _keyboardPanel.IsVisible = true;
-        _dismissLayer.IsVisible = true;
+        _dismissLayer.IsVisible = false;
         SuppressNativeKeyboard();
     }
 
@@ -202,12 +216,18 @@ internal sealed class AppKeyboardHost : Grid
     private void HideKeyboard()
     {
         _keyboardPanel.IsVisible = false;
+        _keyboardBackdrop.IsVisible = false;
         _dismissLayer.IsVisible = false;
         _activeEntry?.Unfocus();
     }
 
     private void HandleDismissTap(TappedEventArgs args)
     {
+        if (!_keyboardPanel.IsVisible)
+        {
+            return;
+        }
+
         var tapPoint = args.GetPosition(this);
         if (tapPoint is null)
         {

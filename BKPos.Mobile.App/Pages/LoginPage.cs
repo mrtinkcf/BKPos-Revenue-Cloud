@@ -253,11 +253,7 @@ public sealed class LoginPage : ContentPage
 
             if (!MobileActivationStore.IsActivatedFor(currentHardwareId, license.LicenseId))
             {
-                await DisplayAlert(
-                    "Chưa kích hoạt trên thiết bị",
-                    "Vui lòng vào biểu tượng bản quyền, nhập key và bấm Kích hoạt trước khi đăng nhập.",
-                    "OK");
-                return;
+                MobileActivationStore.MarkActivated(currentHardwareId, license.LicenseId);
             }
 
             await _api.LoginAsync(username, password);

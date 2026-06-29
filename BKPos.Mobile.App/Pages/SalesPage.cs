@@ -1,6 +1,7 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using BKPos.Mobile.App.Services;
 using Microsoft.Maui.ApplicationModel;
+using Microsoft.Maui.Controls.Shapes;
 
 namespace BKPos.Mobile.App.Pages;
 
@@ -82,7 +83,7 @@ public sealed class SalesPage : ContentPage
         _tableSearch.TextChanged += (_, _) => ApplyTableFilter();
         _search.TextChanged += (_, _) => ApplyProductFilter();
 
-        var logoutDrawer = BuildLogoutDrawer();
+        var (logoutDrawer, drawerDismiss) = BuildLogoutDrawer();
 
         var body = new Grid
         {
@@ -109,93 +110,108 @@ public sealed class SalesPage : ContentPage
             RowDefinitions = { new RowDefinition(GridLength.Star) }
         };
         root.Add(body, 0, 0);
+        root.Add(drawerDismiss, 0, 0);
         root.Add(_busy, 0, 0);
         root.Add(logoutDrawer, 0, 0);
         return root;
     }
 
-    private View BuildLogoutDrawer()
+    private (View drawer, BoxView dismissOverlay) BuildLogoutDrawer()
     {
 #if IOS
-        var toggleW = AppUi.S(20);
-        var portraitW = AppUi.S(38);
-        var logoutW = AppUi.S(72);
-        var h = AppUi.S(30);
+        var toggleW = AppUi.S(8);
+        var menuW = AppUi.S(84);
+        var rowH = AppUi.S(28);
 #else
-        var toggleW = AppUi.S(32);
-        var portraitW = AppUi.S(52);
-        var logoutW = AppUi.S(108);
-        var h = AppUi.S(40);
+        var toggleW = AppUi.S(10);
+        var menuW = AppUi.S(104);
+        var rowH = AppUi.S(34);
 #endif
-        var actionW = portraitW + logoutW;
+        var menuH = rowH * 3;
+        var notchX = toggleW * 0.3;
+
+        var dismissOverlay = new BoxView
+        {
+            BackgroundColor = Color.FromRgba(0, 0, 0, 0.001),
+            InputTransparent = true,
+            ZIndex = 9,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill
+        };
+
+        var pentagon = new Polygon
+        {
+            Fill = new SolidColorBrush(AppUi.Navy2),
+            Points = new PointCollection
+            {
+                new Point(toggleW, 0),
+                new Point(toggleW, menuH),
+                new Point(notchX, menuH),
+                new Point(0, menuH / 2.0),
+                new Point(notchX, 0)
+            },
+            InputTransparent = true,
+            HorizontalOptions = LayoutOptions.Fill,
+            VerticalOptions = LayoutOptions.Fill
+        };
 
         var toggleArrow = new Label
         {
             Text = "‹",
             TextColor = Colors.White,
-            FontSize = AppUi.S(18),
+            FontSize = AppUi.S(9),
             FontAttributes = FontAttributes.Bold,
             HorizontalTextAlignment = TextAlignment.Center,
-            VerticalTextAlignment = TextAlignment.Center
+            VerticalTextAlignment = TextAlignment.Center,
+            Padding = new Thickness(0),
+            InputTransparent = true
         };
 
-        var toggle = new Border
+        var toggle = new Grid
         {
-            BackgroundColor = AppUi.Navy2,
-            StrokeThickness = 0,
             WidthRequest = toggleW,
-            HeightRequest = h,
-            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle
-            {
-                CornerRadius = new CornerRadius(10, 0, 0, 10)
-            },
-            Content = toggleArrow
+            HeightRequest = menuH,
+            Children = { pentagon, toggleArrow }
         };
 
-        var portraitSwitch = new Border
+        Border MenuItem(string text, Color background, Func<Task> onTap)
         {
-            BackgroundColor = Color.FromArgb("#1E3A5F"),
-            StrokeThickness = 0,
-            IsVisible = false,
-            HeightRequest = h,
-            WidthRequest = portraitW,
-            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 0 },
-            Content = new Label
+            var item = new Border
             {
-                Text = "↕",
-                TextColor = Colors.White,
-                FontSize = AppUi.S(14),
-                FontAttributes = FontAttributes.Bold,
-                HorizontalTextAlignment = TextAlignment.Center,
-                VerticalTextAlignment = TextAlignment.Center
-            }
-        };
+                BackgroundColor = background,
+                StrokeThickness = 0,
+                IsVisible = false,
+                HeightRequest = rowH,
+                WidthRequest = menuW,
+                Padding = new Thickness(AppUi.S(6), 0),
+                StrokeShape = new RoundRectangle { CornerRadius = 0 },
+                Content = new Label
+                {
+                    Text = text,
+                    TextColor = Colors.White,
+                    FontAttributes = FontAttributes.Bold,
+                    FontSize = AppUi.S(10),
+                    HorizontalTextAlignment = TextAlignment.Center,
+                    VerticalTextAlignment = TextAlignment.Center,
+                    LineBreakMode = LineBreakMode.TailTruncation
+                }
+            };
 
-        var logout = new Border
-        {
-            BackgroundColor = Color.FromArgb("#B91C1C"),
-            StrokeThickness = 0,
-            IsVisible = false,
-            HeightRequest = h,
-            WidthRequest = logoutW,
-            Padding = new Thickness(AppUi.S(4), 0),
-            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 0 },
-            Content = new Label
-            {
-                Text = "Đăng xuất",
-                TextColor = Colors.White,
-                FontAttributes = FontAttributes.Bold,
-                FontSize = AppUi.S(10),
-                HorizontalTextAlignment = TextAlignment.Center,
-                VerticalTextAlignment = TextAlignment.Center
-            }
-        };
+            var itemTap = new TapGestureRecognizer();
+            itemTap.Tapped += async (_, _) => await onTap();
+            item.GestureRecognizers.Add(itemTap);
+            return item;
+        }
+
+        var printedBills = MenuItem("Bill đã in", AppUi.Blue, OpenPrintedBillsAsync);
+        var portraitSwitch = MenuItem("Chuyển dọc", Color.FromArgb("#1E3A5F"), SwitchToPortraitAsync);
+        var logout = MenuItem("Đăng xuất", Color.FromArgb("#B91C1C"), LogoutAsync);
 
         var drawer = new Grid
         {
-            WidthRequest = toggleW + actionW,
-            HeightRequest = h,
-            TranslationX = actionW,
+            WidthRequest = toggleW + menuW,
+            HeightRequest = menuH,
+            TranslationX = menuW,
             HorizontalOptions = LayoutOptions.End,
             VerticalOptions = LayoutOptions.Start,
             Margin = new Thickness(0, AppUi.S(64), 0, 0),
@@ -203,47 +219,65 @@ public sealed class SalesPage : ContentPage
             ColumnDefinitions =
             {
                 new ColumnDefinition(new GridLength(toggleW)),
-                new ColumnDefinition(new GridLength(portraitW)),
-                new ColumnDefinition(new GridLength(logoutW))
+                new ColumnDefinition(new GridLength(menuW))
             },
-            ColumnSpacing = 0
+            RowDefinitions =
+            {
+                new RowDefinition(new GridLength(rowH)),
+                new RowDefinition(new GridLength(rowH)),
+                new RowDefinition(new GridLength(rowH))
+            },
+            ColumnSpacing = 0,
+            RowSpacing = 0
         };
 
+        void SetMenuVisible(bool visible)
+        {
+            printedBills.IsVisible = visible;
+            portraitSwitch.IsVisible = visible;
+            logout.IsVisible = visible;
+        }
+
         var isOpen = false;
+
+        async Task CloseDrawer()
+        {
+            isOpen = false;
+            toggleArrow.Text = "‹";
+            dismissOverlay.InputTransparent = true;
+            await drawer.TranslateTo(menuW, 0, 160, Easing.CubicOut);
+            SetMenuVisible(false);
+        }
+
+        var dismissTap = new TapGestureRecognizer();
+        dismissTap.Tapped += async (_, _) => await CloseDrawer();
+        dismissOverlay.GestureRecognizers.Add(dismissTap);
+
         var tap = new TapGestureRecognizer();
         tap.Tapped += async (_, _) =>
         {
-            isOpen = !isOpen;
-            toggleArrow.Text = isOpen ? "›" : "‹";
             if (isOpen)
             {
-                portraitSwitch.IsVisible = true;
-                logout.IsVisible = true;
+                await CloseDrawer();
             }
-
-            await drawer.TranslateTo(isOpen ? 0 : actionW, 0, 160, Easing.CubicOut);
-            if (!isOpen)
+            else
             {
-                portraitSwitch.IsVisible = false;
-                logout.IsVisible = false;
+                isOpen = true;
+                toggleArrow.Text = "›";
+                SetMenuVisible(true);
+                dismissOverlay.InputTransparent = false;
+                await drawer.TranslateTo(0, 0, 160, Easing.CubicOut);
             }
         };
         toggle.GestureRecognizers.Add(tap);
 
-        var portraitTap = new TapGestureRecognizer();
-        portraitTap.Tapped += async (_, _) => await SwitchToPortraitAsync();
-        portraitSwitch.GestureRecognizers.Add(portraitTap);
-
-        var logoutTap = new TapGestureRecognizer();
-        logoutTap.Tapped += async (_, _) => await LogoutAsync();
-        logout.GestureRecognizers.Add(logoutTap);
-
         drawer.Add(toggle, 0, 0);
-        drawer.Add(portraitSwitch, 1, 0);
-        drawer.Add(logout, 2, 0);
-        return drawer;
+        Grid.SetRowSpan(toggle, 3);
+        drawer.Add(printedBills, 1, 0);
+        drawer.Add(portraitSwitch, 1, 1);
+        drawer.Add(logout, 1, 2);
+        return (drawer, dismissOverlay);
     }
-
     private View BuildProductsPanel()
     {
         _search.HeightRequest = AppUi.S(36);
@@ -871,10 +905,14 @@ public sealed class SalesPage : ContentPage
     private void ApplyProductFilter()
     {
         var keyword = (_search.Text ?? string.Empty).Trim();
-        var filtered = _allProducts.Where(product =>
-            string.IsNullOrWhiteSpace(keyword)
-            || AppUi.ContainsSearch(product.Name, keyword)
-            || AppUi.ContainsSearch(product.CategoryName, keyword));
+        var filtered = string.IsNullOrWhiteSpace(keyword)
+            ? _allProducts
+            : _allProducts
+                .Select(product => new { Product = product, Score = AppUi.ProductSearchScore(product.Name, keyword) })
+                .Where(item => item.Score >= 0)
+                .OrderBy(item => item.Score)
+                .ThenBy(item => item.Product.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(item => item.Product);
 
         _products.Clear();
         foreach (var product in filtered)
@@ -1685,6 +1723,11 @@ public sealed class SalesPage : ContentPage
         var portrait = new PortraitSalesPage(_api, _loginSettings, _printSettings, _orientationSettings);
         Navigation.InsertPageBefore(portrait, this);
         await Navigation.PopAsync(false);
+    }
+
+    private async Task OpenPrintedBillsAsync()
+    {
+        await Navigation.PushModalAsync(new PrintedBillsPage(_api));
     }
 
     private async Task LogoutAsync()

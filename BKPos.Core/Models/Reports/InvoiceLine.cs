@@ -10,7 +10,7 @@ public sealed class InvoiceLine
 
     public string ProductName { get; set; } = string.Empty;
 
-    public int Quantity { get; set; }
+    public decimal Quantity { get; set; }
 
     public string UnitName { get; set; } = string.Empty;
 

@@ -89,6 +89,11 @@ public static class MauiProgram
     {
         var editText = handler.PlatformView;
         editText.SetSingleLine(true);
+        editText.Background = null;
+        editText.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Android.Graphics.Color.Transparent);
+        editText.SetBackgroundColor(Android.Graphics.Color.Transparent);
+        editText.SetPadding(0, 0, 0, 0);
+        editText.SetMinHeight(0);
         editText.ShowSoftInputOnFocus = false;
         editText.ImeOptions = (ImeAction)((int)editText.ImeOptions
             | (int)ImeFlags.NoExtractUi
@@ -107,7 +112,5 @@ public static class MauiProgram
     }
 #endif
 }
-
-
 
 

@@ -246,9 +246,16 @@ public sealed class OrderPage : ContentPage
     {
         var category = _categoryPicker.SelectedIndex > 0 ? _categoryPicker.Items[_categoryPicker.SelectedIndex] : string.Empty;
         var keyword = (_search.Text ?? string.Empty).Trim();
-        var filtered = _allProducts.Where(product =>
-            (string.IsNullOrWhiteSpace(category) || string.Equals(product.CategoryName, category, StringComparison.OrdinalIgnoreCase))
-            && AppUi.ContainsSearch(product.Name, keyword));
+        var candidates = _allProducts.Where(product =>
+            string.IsNullOrWhiteSpace(category) || string.Equals(product.CategoryName, category, StringComparison.OrdinalIgnoreCase));
+        var filtered = string.IsNullOrWhiteSpace(keyword)
+            ? candidates
+            : candidates
+                .Select(product => new { Product = product, Score = AppUi.ProductSearchScore(product.Name, keyword) })
+                .Where(item => item.Score >= 0)
+                .OrderBy(item => item.Score)
+                .ThenBy(item => item.Product.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(item => item.Product);
 
         _products.Clear();
         foreach (var product in filtered)
@@ -481,5 +488,4 @@ public sealed class OrderPage : ContentPage
         }
     }
 }
-
 

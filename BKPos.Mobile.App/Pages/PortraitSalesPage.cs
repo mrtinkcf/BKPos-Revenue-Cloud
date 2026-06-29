@@ -14,10 +14,12 @@ public sealed class PortraitSalesPage : ContentPage
     private readonly ObservableCollection<TableCard> _tables = [];
     private readonly ObservableCollection<OrderLineCard> _lines = [];
     private readonly ObservableCollection<PortraitProductCard> _products = [];
+    private readonly ObservableCollection<PrintedBillCard> _printedBills = [];
 
     private readonly CollectionView _tableList;
     private readonly CollectionView _lineList;
     private readonly CollectionView _productList;
+    private readonly CollectionView _printedBillList;
 
     private readonly Entry _tableSearch = new()
     {
@@ -82,15 +84,18 @@ public sealed class PortraitSalesPage : ContentPage
     private Grid? _tablesPanel;
     private Grid? _orderPanel;
     private Grid? _productsPanel;
+    private Grid? _printedBillsPanel;
     private int _activeTab = 0;
 
     // ── Tab bar labels ────────────────────────────────────────────────────
     private readonly Label _tabBanLabel = new() { Text = "Bàn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
     private readonly Label _tabDonLabel = new() { Text = "Món ăn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
     private readonly Label _tabMonLabel = new() { Text = "Hóa đơn", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
+    private readonly Label _tabBillLabel = new() { Text = "Bill đã in", FontSize = AppUi.S(12), FontAttributes = FontAttributes.Bold, HorizontalTextAlignment = TextAlignment.Center };
     private readonly Border _tabBanBtn = null!;
     private readonly Border _tabDonBtn = null!;
     private readonly Border _tabMonBtn = null!;
+    private readonly Border _tabBillBtn = null!;
 
     // ── Inner record ──────────────────────────────────────────────────────
     private sealed record PortraitProductCard(ProductDto Source, int CurrentQty)
@@ -121,8 +126,9 @@ public sealed class PortraitSalesPage : ContentPage
         _tableList = BuildTableList();
         _lineList = BuildLineList();
         _productList = BuildProductList();
+        _printedBillList = BuildPrintedBillList();
 
-        (_tabBanBtn, _tabDonBtn, _tabMonBtn) = BuildTabButtons();
+        (_tabBanBtn, _tabDonBtn, _tabMonBtn, _tabBillBtn) = BuildTabButtons();
 
         Content = AppKeyboardHost.Wrap(BuildContent());
         ApplyTabHighlight();
@@ -145,14 +151,17 @@ public sealed class PortraitSalesPage : ContentPage
         _tablesPanel = BuildTablesPanel();
         _orderPanel = BuildOrderPanel();
         _productsPanel = BuildProductsPanel();
+        _printedBillsPanel = BuildPrintedBillsPanel();
 
         _orderPanel.IsVisible = false;
         _productsPanel.IsVisible = false;
+        _printedBillsPanel.IsVisible = false;
 
         var contentArea = new Grid();
         contentArea.Add(_tablesPanel);
         contentArea.Add(_orderPanel);
         contentArea.Add(_productsPanel);
+        contentArea.Add(_printedBillsPanel);
 
         _busy.HorizontalOptions = LayoutOptions.End;
         _busy.VerticalOptions = LayoutOptions.End;
@@ -229,7 +238,7 @@ public sealed class PortraitSalesPage : ContentPage
         return bar;
     }
 
-    private (Border ban, Border don, Border mon) BuildTabButtons()
+    private (Border ban, Border don, Border mon, Border bill) BuildTabButtons()
     {
         Border MakeTab(Label lbl, string icon, int idx)
         {
@@ -263,7 +272,8 @@ public sealed class PortraitSalesPage : ContentPage
         var ban = MakeTab(_tabBanLabel, "🗂", 0);
         var don = MakeTab(_tabDonLabel, "🍽", 1);
         var mon = MakeTab(_tabMonLabel, "📋", 2);
-        return (ban, don, mon);
+        var bill = MakeTab(_tabBillLabel, "🧾", 3);
+        return (ban, don, mon, bill);
     }
 
     private View BuildTabBar()
@@ -275,6 +285,7 @@ public sealed class PortraitSalesPage : ContentPage
             {
                 new ColumnDefinition(GridLength.Star),
                 new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Star),
                 new ColumnDefinition(GridLength.Star)
             },
             ColumnSpacing = 0
@@ -282,6 +293,7 @@ public sealed class PortraitSalesPage : ContentPage
         bar.Add(_tabBanBtn, 0, 0);
         bar.Add(_tabDonBtn, 1, 0);
         bar.Add(_tabMonBtn, 2, 0);
+        bar.Add(_tabBillBtn, 3, 0);
 
         var wrapper = new Grid
         {
@@ -454,6 +466,20 @@ public sealed class PortraitSalesPage : ContentPage
         };
         panel.Add(PortraitSearchBox(_productSearch), 0, 0);
         panel.Add(_productList, 0, 1);
+        return panel;
+    }
+
+    private Grid BuildPrintedBillsPanel()
+    {
+        var panel = new Grid
+        {
+            Padding = new Thickness(AppUi.S(8)),
+            RowDefinitions =
+            {
+                new RowDefinition(GridLength.Star)
+            }
+        };
+        panel.Add(_printedBillList, 0, 0);
         return panel;
     }
 
@@ -742,6 +768,108 @@ public sealed class PortraitSalesPage : ContentPage
         return list;
     }
 
+    private CollectionView BuildPrintedBillList()
+    {
+        var list = new CollectionView
+        {
+            ItemsSource = _printedBills,
+#if IOS
+            SelectionMode = SelectionMode.None,
+#else
+            SelectionMode = SelectionMode.Single,
+#endif
+            ItemTemplate = new DataTemplate(() =>
+            {
+                var table = new Label
+                {
+                    TextColor = AppUi.Ink,
+                    FontAttributes = FontAttributes.Bold,
+                    FontSize = AppUi.S(14),
+                    LineBreakMode = LineBreakMode.TailTruncation
+                };
+                table.SetBinding(Label.TextProperty, nameof(PrintedBillCard.TableName));
+
+                var paidAt = new Label
+                {
+                    TextColor = AppUi.Muted,
+                    FontSize = AppUi.S(11)
+                };
+                paidAt.SetBinding(Label.TextProperty, nameof(PrintedBillCard.PaidAtText));
+
+                var cashier = new Label
+                {
+                    TextColor = AppUi.Muted,
+                    FontSize = AppUi.S(11),
+                    LineBreakMode = LineBreakMode.TailTruncation
+                };
+                cashier.SetBinding(Label.TextProperty, nameof(PrintedBillCard.CashierText));
+
+                var discount = new Label
+                {
+                    TextColor = AppUi.Orange,
+                    FontSize = AppUi.S(11),
+                    FontAttributes = FontAttributes.Bold
+                };
+                discount.SetBinding(Label.TextProperty, nameof(PrintedBillCard.DiscountText));
+                discount.SetBinding(VisualElement.IsVisibleProperty, nameof(PrintedBillCard.HasDiscount));
+
+                var total = new Label
+                {
+                    TextColor = AppUi.Blue,
+                    FontAttributes = FontAttributes.Bold,
+                    FontSize = AppUi.S(16),
+                    HorizontalTextAlignment = TextAlignment.End,
+                    VerticalTextAlignment = TextAlignment.Center
+                };
+                total.SetBinding(Label.TextProperty, nameof(PrintedBillCard.TotalText));
+
+                var left = new VerticalStackLayout
+                {
+                    Spacing = 2,
+                    Children = { table, paidAt, cashier, discount }
+                };
+
+                var grid = new Grid
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition(GridLength.Star),
+                        new ColumnDefinition(GridLength.Auto)
+                    },
+                    ColumnSpacing = 8
+                };
+                grid.Add(left, 0, 0);
+                grid.Add(total, 1, 0);
+
+                var card = AppUi.CardView(grid, 9);
+#if IOS
+                var tap = new TapGestureRecognizer();
+                tap.Tapped += async (sender, _) =>
+                {
+                    if (sender is BindableObject bo && bo.BindingContext is PrintedBillCard bill)
+                    {
+                        await MarkTappedAsync(card);
+                        await OpenPrintedBillAsync(bill);
+                    }
+                };
+                card.GestureRecognizers.Add(tap);
+#endif
+                return card;
+            })
+        };
+#if !IOS
+        list.SelectionChanged += async (_, e) =>
+        {
+            if (e.CurrentSelection.FirstOrDefault() is PrintedBillCard bill)
+            {
+                list.SelectedItem = null;
+                await OpenPrintedBillAsync(bill);
+            }
+        };
+#endif
+        return list;
+    }
+
     private static Border PortraitSearchBox(Entry entry) => new()
     {
         BackgroundColor = AppUi.SurfaceAlt,
@@ -760,12 +888,22 @@ public sealed class PortraitSalesPage : ContentPage
         if (_tablesPanel != null) _tablesPanel.IsVisible = tab == 0;
         if (_productsPanel != null) _productsPanel.IsVisible = tab == 1;
         if (_orderPanel != null) _orderPanel.IsVisible = tab == 2;
+        if (_printedBillsPanel != null) _printedBillsPanel.IsVisible = tab == 3;
         UpdateHeaderTitle();
         ApplyTabHighlight();
+
+        if (tab == 3)
+            _ = LoadPrintedBillsAsync(force: true);
     }
 
     private void UpdateHeaderTitle()
     {
+        if (_activeTab == 3)
+        {
+            _headerTitle.Text = "Bill đã in";
+            return;
+        }
+
         if (_currentTable is null)
         {
             _headerTitle.Text = "BKPos Mobile";
@@ -794,6 +932,7 @@ public sealed class PortraitSalesPage : ContentPage
         Style(_tabBanLabel, _tabBanBtn, _activeTab == 0);
         Style(_tabDonLabel, _tabDonBtn, _activeTab == 1);
         Style(_tabMonLabel, _tabMonBtn, _activeTab == 2);
+        Style(_tabBillLabel, _tabBillBtn, _activeTab == 3);
     }
 
     // ── Orientation switch ────────────────────────────────────────────────
@@ -834,6 +973,26 @@ public sealed class PortraitSalesPage : ContentPage
         ApplyTableFilter();
     }
 
+
+    private async Task LoadPrintedBillsAsync(bool force = false)
+    {
+        await RunAsync(async () =>
+        {
+            var bills = await _api.GetPrintedBillsTodayAsync();
+            _printedBills.Clear();
+            foreach (var bill in bills.OrderByDescending(b => b.PaidAt ?? b.BusinessDate ?? b.StartTime))
+                _printedBills.Add(new PrintedBillCard(bill));
+        }, "Đã tải bill hôm nay.", "Tải bill thất bại");
+    }
+
+    private async Task OpenPrintedBillAsync(PrintedBillCard bill)
+    {
+        await RunAsync(async () =>
+        {
+            var detail = await _api.GetPrintedBillAsync(bill.Source.OrderId);
+            await Navigation.PushModalAsync(new PrintedBillDetailPage(_api, detail));
+        }, "Đã mở chi tiết bill.", "Mở bill thất bại");
+    }
     // ── Filter ────────────────────────────────────────────────────────────
 
     private void ApplyTableFilter()
@@ -857,10 +1016,14 @@ public sealed class PortraitSalesPage : ContentPage
     private void ApplyProductFilter()
     {
         var keyword = (_productSearch.Text ?? string.Empty).Trim();
-        var filtered = _allProducts.Where(p =>
-            string.IsNullOrWhiteSpace(keyword)
-            || AppUi.ContainsSearch(p.Name, keyword)
-            || AppUi.ContainsSearch(p.CategoryName, keyword));
+        var filtered = string.IsNullOrWhiteSpace(keyword)
+            ? _allProducts
+            : _allProducts
+                .Select(product => new { Product = product, Score = AppUi.ProductSearchScore(product.Name, keyword) })
+                .Where(item => item.Score >= 0)
+                .OrderBy(item => item.Score)
+                .ThenBy(item => item.Product.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(item => item.Product);
 
         _products.Clear();
         foreach (var p in filtered)
@@ -1206,6 +1369,7 @@ public sealed class PortraitSalesPage : ContentPage
 
             CancelAutoKitchenTimer(orderId);
             ClearCurrentOrder();
+            _printedBills.Clear();
             await LoadTablesAsync();
             SwitchTab(0);
         }, "Đã thanh toán.");

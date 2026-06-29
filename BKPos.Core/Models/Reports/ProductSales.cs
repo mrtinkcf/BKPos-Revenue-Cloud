@@ -6,7 +6,7 @@ public sealed class ProductSales
 
     public string CategoryName { get; set; } = string.Empty;
 
-    public int QtySold { get; set; }
+    public decimal QtySold { get; set; }
 
     public decimal Revenue { get; set; }
 

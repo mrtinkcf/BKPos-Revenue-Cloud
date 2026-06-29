@@ -1,4 +1,4 @@
-namespace BKPos.Core.Models.Inventory;
+﻿namespace BKPos.Core.Models.Inventory;
 
 public static class InventoryDirections
 {

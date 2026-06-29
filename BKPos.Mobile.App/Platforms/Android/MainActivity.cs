@@ -2,6 +2,8 @@
 using Android.Content.PM;
 using Android.OS;
 using Android.Views;
+using Android.Views.InputMethods;
+using Android.Widget;
 
 namespace BKPos.Mobile.App;
 
@@ -27,5 +29,26 @@ public class MainActivity : MauiAppCompatActivity
         base.OnDestroy();
         if (ReferenceEquals(Current, this))
             Current = null;
+    }
+
+    // Dismiss keyboard khi touch ra ngoài Entry, để button nhận tap ngay lần đầu thay vì bấm 2 lần
+    public override bool DispatchTouchEvent(MotionEvent? ev)
+    {
+        if (ev?.Action == MotionEventActions.Down)
+        {
+            var focused = CurrentFocus;
+            if (focused is EditText)
+            {
+                var rect = new Android.Graphics.Rect();
+                focused.GetGlobalVisibleRect(rect);
+                if (!rect.Contains((int)ev.RawX, (int)ev.RawY))
+                {
+                    focused.ClearFocus();
+                    var imm = GetSystemService(InputMethodService) as InputMethodManager;
+                    imm?.HideSoftInputFromWindow(focused.WindowToken, HideSoftInputFlags.None);
+                }
+            }
+        }
+        return base.DispatchTouchEvent(ev);
     }
 }

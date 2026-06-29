@@ -14,6 +14,50 @@ public static class MoneyFormatter
     public static string FormatCurrency(decimal value) =>
         FormatNumber(value) + CurrencySuffix;
 
+    public static string FormatQuantity(decimal value) =>
+        value.ToString("0.###", DisplayCulture);
+
+    public static decimal ParseQuantity(string? value)
+    {
+        var text = (value ?? string.Empty).Trim().Replace(" ", string.Empty);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0m;
+        }
+
+        var lastComma = text.LastIndexOf(',');
+        var lastDot = text.LastIndexOf('.');
+        var decimalIndex = Math.Max(lastComma, lastDot);
+        if (decimalIndex >= 0)
+        {
+            var normalized = new System.Text.StringBuilder(text.Length);
+            for (var i = 0; i < text.Length; i++)
+            {
+                var character = text[i];
+                if (char.IsDigit(character) || (i == 0 && character == '-'))
+                {
+                    normalized.Append(character);
+                }
+                else if (i == decimalIndex)
+                {
+                    normalized.Append('.');
+                }
+            }
+
+            return decimal.TryParse(
+                normalized.ToString(),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out var normalizedValue)
+                ? normalizedValue
+                : 0m;
+        }
+
+        return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var plainValue)
+            ? plainValue
+            : 0m;
+    }
+
     public static decimal Parse(string? value)
     {
         var text = (value ?? string.Empty)

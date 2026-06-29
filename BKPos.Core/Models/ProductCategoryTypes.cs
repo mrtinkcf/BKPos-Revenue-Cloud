@@ -1,4 +1,4 @@
-using BKPos.Core.Models.Inventory;
+﻿using BKPos.Core.Models.Inventory;
 
 namespace BKPos.Core.Models;
 

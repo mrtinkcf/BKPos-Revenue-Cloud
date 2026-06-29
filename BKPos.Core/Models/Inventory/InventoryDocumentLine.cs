@@ -16,6 +16,8 @@ public sealed class InventoryDocumentLine
 
     public decimal LineTotal => Quantity * UnitPrice;
 
+    public decimal CurrentStock { get; set; }
+
     public string Note { get; set; } = string.Empty;
 
     public int StockMode { get; set; } = InventoryStockModes.Unmanaged;
