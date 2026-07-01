@@ -34,7 +34,7 @@
 
 		<!-- Versions -->
 		<ApplicationDisplayVersion>1.1.3</ApplicationDisplayVersion>
-		<ApplicationVersion>15</ApplicationVersion>
+		<ApplicationVersion>16</ApplicationVersion>
 
 		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
@@ -45,7 +45,7 @@
 	</PropertyGroup>
 
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-		<ApplicationVersion>15</ApplicationVersion>
+		<ApplicationVersion>16</ApplicationVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
