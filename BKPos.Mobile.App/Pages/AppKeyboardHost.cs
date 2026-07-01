@@ -4,9 +4,6 @@ using Microsoft.Maui.Controls.Shapes;
 #if ANDROID
 using Android.Content;
 using Android.Views.InputMethods;
-#elif IOS
-using CoreGraphics;
-using UIKit;
 #endif
 
 namespace BKPos.Mobile.App.Pages;
@@ -51,7 +48,14 @@ internal sealed class AppKeyboardHost : Grid
         Unloaded += (_, _) => _activeEntry = null;
     }
 
-    public static View Wrap(View content) => new AppKeyboardHost(content);
+    public static View Wrap(View content)
+    {
+#if ANDROID
+        return new AppKeyboardHost(content);
+#else
+        return content;
+#endif
+    }
 
     private BoxView BuildDismissLayer()
     {
@@ -563,12 +567,6 @@ internal sealed class AppKeyboardHost : Grid
             editText.ShowSoftInputOnFocus = false;
             var inputMethodManager = (InputMethodManager?)editText.Context?.GetSystemService(Context.InputMethodService);
             inputMethodManager?.HideSoftInputFromWindow(editText.WindowToken, HideSoftInputFlags.None);
-        }
-#elif IOS
-        if (_activeEntry?.Handler?.PlatformView is UITextField textField)
-        {
-            textField.InputView = new UIView(CGRect.Empty);
-            textField.ReloadInputViews();
         }
 #endif
     }
