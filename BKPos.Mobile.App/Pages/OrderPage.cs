@@ -297,9 +297,20 @@ public sealed class OrderPage : ContentPage
             return;
         }
 
+        var cancelChoice = await AskKitchenCancelChoiceForDeleteAsync(line);
+        if (cancelChoice == KitchenCancelChoice.CancelOperation)
+        {
+            return;
+        }
+
         await RunAsync(async () =>
         {
-            await _api.RemoveLineAsync(_order.OrderId, line.Source.Id);
+            await _api.RemoveLineAsync(
+                _order.OrderId,
+                line.Source.Id,
+                cancelChoice == KitchenCancelChoice.PrintCancelTicket,
+                BuildKitchenCancelNote(line),
+                CancellationToken.None);
             await ReloadOrderAsync();
         }, "Đã xóa dòng món.");
     }
@@ -423,12 +434,53 @@ public sealed class OrderPage : ContentPage
             return;
         }
 
+        var cancelChoice = await AskKitchenCancelChoiceForOrderAsync();
+        if (cancelChoice == KitchenCancelChoice.CancelOperation)
+        {
+            return;
+        }
+
         await RunAsync(async () =>
         {
-            await _api.CancelOrderAsync(_order.OrderId);
+            await _api.CancelOrderAsync(
+                _order.OrderId,
+                cancelChoice == KitchenCancelChoice.PrintCancelTicket,
+                "Hủy đơn",
+                CancellationToken.None);
             await Navigation.PopAsync();
         }, "Đã hủy đơn.");
     }
+
+    private async Task<KitchenCancelChoice> AskKitchenCancelChoiceForDeleteAsync(OrderLineCard line)
+    {
+        var printedQuantity = Math.Max(0, line.Source.KitchenPrintedQuantity);
+        if (printedQuantity <= 0)
+        {
+            return KitchenCancelChoice.ContinueWithoutPrint;
+        }
+
+        return await AppUi.AskKitchenCancelChoiceAsync(
+            this,
+            "In món hủy xuống bếp?",
+            $"{line.ProductName}: hủy {printedQuantity} món đã in bếp.");
+    }
+
+    private async Task<KitchenCancelChoice> AskKitchenCancelChoiceForOrderAsync()
+    {
+        var printedCount = _order.Lines.Sum(line => Math.Max(0, line.KitchenPrintedQuantity));
+        if (printedCount <= 0)
+        {
+            return KitchenCancelChoice.ContinueWithoutPrint;
+        }
+
+        return await AppUi.AskKitchenCancelChoiceAsync(
+            this,
+            "In món hủy xuống bếp?",
+            $"Hủy {printedCount} món đã in bếp trong đơn.");
+    }
+
+    private static string BuildKitchenCancelNote(OrderLineCard line)
+        => string.IsNullOrWhiteSpace(line.Note) ? "Hủy món" : "Hủy món - " + line.Note;
 
     private async Task PollVersionAsync()
     {
@@ -488,4 +540,3 @@ public sealed class OrderPage : ContentPage
         }
     }
 }
-

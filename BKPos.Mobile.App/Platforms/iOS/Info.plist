@@ -20,7 +20,7 @@
     <key>NSAppTransportSecurity</key>
     <dict>
       <key>NSAllowsArbitraryLoads</key>
-      <true />
+      <false />
       <key>NSAllowsLocalNetworking</key>
       <true />
     </dict>
@@ -38,6 +38,8 @@
     </array>
     <key>CFBundleIconName</key>
     <string>appicon</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false />
     <key>CFBundleIcons</key>
     <dict>
       <key>CFBundlePrimaryIcon</key>

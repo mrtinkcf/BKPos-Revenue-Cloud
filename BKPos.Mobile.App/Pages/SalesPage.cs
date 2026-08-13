@@ -967,31 +967,43 @@ public sealed class SalesPage : ContentPage
 
         await Navigation.PushModalAsync(new OrderLineEditPage(
             line,
-            async (quantity, note) => await SaveLineAsync(line, quantity, note),
-            async () => await DeleteLineAsync(line)));
+            async (quantity, note, cancelChoice) => await SaveLineAsync(line, quantity, note, cancelChoice),
+            async cancelChoice => await DeleteLineAsync(line, cancelChoice)));
     }
 
-    private async Task SaveLineAsync(OrderLineCard line, int quantity, string note)
+    private async Task SaveLineAsync(OrderLineCard line, int quantity, string note, KitchenCancelChoice cancelChoice)
     {
         if (_currentOrder is null)
         {
             return;
         }
 
-        var mutation = await _api.UpdateLineAsync(_currentOrder.OrderId, line.Source.Id, quantity, note);
+        var mutation = await _api.UpdateLineAsync(
+            _currentOrder.OrderId,
+            line.Source.Id,
+            quantity,
+            note,
+            cancelChoice == KitchenCancelChoice.PrintCancelTicket,
+            BuildKitchenCancelNote(line),
+            CancellationToken.None);
         await ApplyMutationResponseAsync(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã cập nhật món.";
     }
 
-    private async Task DeleteLineAsync(OrderLineCard line)
+    private async Task DeleteLineAsync(OrderLineCard line, KitchenCancelChoice cancelChoice)
     {
         if (_currentOrder is null)
         {
             return;
         }
 
-        var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
+        var mutation = await _api.RemoveLineAsync(
+            _currentOrder.OrderId,
+            line.Source.Id,
+            cancelChoice == KitchenCancelChoice.PrintCancelTicket,
+            BuildKitchenCancelNote(line),
+            CancellationToken.None);
         await ApplyMutationResponseAsync(mutation);
         ScheduleAutoKitchenPrintIfNeeded();
         _status.Text = "Đã xóa món.";
@@ -1014,13 +1026,41 @@ public sealed class SalesPage : ContentPage
             return;
         }
 
+        var cancelChoice = await AskKitchenCancelChoiceForDeleteAsync(line);
+        if (cancelChoice == KitchenCancelChoice.CancelOperation)
+        {
+            return;
+        }
+
         await RunAsync(async () =>
         {
-            var mutation = await _api.RemoveLineAsync(_currentOrder.OrderId, line.Source.Id);
+            var mutation = await _api.RemoveLineAsync(
+                _currentOrder.OrderId,
+                line.Source.Id,
+                cancelChoice == KitchenCancelChoice.PrintCancelTicket,
+                BuildKitchenCancelNote(line),
+                CancellationToken.None);
             await ApplyMutationResponseAsync(mutation);
             ScheduleAutoKitchenPrintIfNeeded();
         }, "Đã hủy món.", "Hủy món thất bại");
     }
+
+    private async Task<KitchenCancelChoice> AskKitchenCancelChoiceForDeleteAsync(OrderLineCard line)
+    {
+        var printedQuantity = Math.Max(0, line.Source.KitchenPrintedQuantity);
+        if (printedQuantity <= 0)
+        {
+            return KitchenCancelChoice.ContinueWithoutPrint;
+        }
+
+        return await AppUi.AskKitchenCancelChoiceAsync(
+            this,
+            "In món hủy xuống bếp?",
+            $"{line.ProductName}: hủy {printedQuantity} món đã in bếp.");
+    }
+
+    private static string BuildKitchenCancelNote(OrderLineCard line)
+        => string.IsNullOrWhiteSpace(line.Note) ? "Hủy món" : "Hủy món - " + line.Note;
 
     private async Task RefreshCurrentOrderAsync()
     {
@@ -1781,5 +1821,3 @@ public sealed class SalesPage : ContentPage
         }
     }
 }
-
-

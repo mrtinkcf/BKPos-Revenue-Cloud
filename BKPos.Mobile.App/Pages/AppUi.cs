@@ -241,6 +241,29 @@ internal static class AppUi
     public static async Task ShowErrorAsync(Page page, string message, string title = "Thông báo")
         => await page.DisplayAlert(title, message, "OK");
 
+    public static async Task<KitchenCancelChoice> AskKitchenCancelChoiceAsync(Page page, string title, string message)
+    {
+        if (OperatingSystem.IsIOS())
+        {
+            return KitchenCancelChoice.PrintCancelTicket;
+        }
+
+        var promptTitle = string.IsNullOrWhiteSpace(message) ? title : $"{title}\n{message}";
+        var selected = await page.DisplayActionSheet(
+            promptTitle,
+            "Không hủy",
+            null,
+            "In hủy xuống bếp",
+            "Tiếp tục không in");
+
+        return selected switch
+        {
+            "In hủy xuống bếp" => KitchenCancelChoice.PrintCancelTicket,
+            "Tiếp tục không in" => KitchenCancelChoice.ContinueWithoutPrint,
+            _ => KitchenCancelChoice.CancelOperation
+        };
+    }
+
     public static string ToVietnameseError(Exception ex)
     {
         if (ex is ApiException api)
@@ -279,6 +302,13 @@ internal static class AppUi
 
         return $"Lỗi: {ex.Message}";
     }
+}
+
+internal enum KitchenCancelChoice
+{
+    CancelOperation,
+    ContinueWithoutPrint,
+    PrintCancelTicket
 }
 
 internal sealed class TableCard : INotifyPropertyChanged

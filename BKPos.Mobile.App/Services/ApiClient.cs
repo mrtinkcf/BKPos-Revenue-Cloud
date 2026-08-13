@@ -152,23 +152,67 @@ public sealed class ApiClient
             new AddOrderLineRequestDto(product.ExternalId, product.Name, quantity, product.Price, note),
             cancellationToken: cancellationToken);
 
-    public async Task<MutationResponseDto> UpdateLineAsync(string orderId, string lineId, int quantity, string? note, CancellationToken cancellationToken = default)
+    public async Task<MutationResponseDto> UpdateLineAsync(
+        string orderId,
+        string lineId,
+        int quantity,
+        string? note,
+        CancellationToken cancellationToken = default)
+        => await UpdateLineAsync(orderId, lineId, quantity, note, null, null, cancellationToken);
+
+    public async Task<MutationResponseDto> UpdateLineAsync(
+        string orderId,
+        string lineId,
+        int quantity,
+        string? note,
+        bool? printCancelToKitchen,
+        string? cancelNote,
+        CancellationToken cancellationToken = default)
         => await SendAsync<MutationResponseDto>(
             HttpMethod.Patch,
             $"/orders/{Uri.EscapeDataString(orderId)}/lines/{Uri.EscapeDataString(lineId)}",
-            new UpdateOrderLineRequestDto(quantity, note),
+            new UpdateOrderLineRequestDto(quantity, note, printCancelToKitchen, cancelNote),
             cancellationToken: cancellationToken);
 
     public async Task<MutationResponseDto> RemoveLineAsync(string orderId, string lineId, CancellationToken cancellationToken = default)
-        => await SendAsync<MutationResponseDto>(
+        => await RemoveLineAsync(orderId, lineId, null, null, cancellationToken);
+
+    public async Task<MutationResponseDto> RemoveLineAsync(
+        string orderId,
+        string lineId,
+        bool? printCancelToKitchen,
+        string? cancelNote,
+        CancellationToken cancellationToken = default)
+    {
+        var encodedOrderId = Uri.EscapeDataString(orderId);
+        var encodedLineId = Uri.EscapeDataString(lineId);
+        if (printCancelToKitchen == true)
+        {
+            return await SendAsync<MutationResponseDto>(
+                HttpMethod.Post,
+                $"/orders/{encodedOrderId}/lines/{encodedLineId}/cancel",
+                BuildKitchenCancelPayload(true, cancelNote),
+                cancellationToken: cancellationToken);
+        }
+
+        return await SendAsync<MutationResponseDto>(
             HttpMethod.Delete,
-            $"/orders/{Uri.EscapeDataString(orderId)}/lines/{Uri.EscapeDataString(lineId)}",
+            $"/orders/{encodedOrderId}/lines/{encodedLineId}",
             cancellationToken: cancellationToken);
+    }
 
     public async Task<JsonElement> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
+        => await CancelOrderAsync(orderId, null, null, cancellationToken);
+
+    public async Task<JsonElement> CancelOrderAsync(
+        string orderId,
+        bool? printCancelToKitchen,
+        string? cancelNote,
+        CancellationToken cancellationToken = default)
         => await SendAsync<JsonElement>(
             HttpMethod.Post,
             $"/orders/{Uri.EscapeDataString(orderId)}/cancel",
+            BuildKitchenCancelPayload(printCancelToKitchen, cancelNote),
             cancellationToken: cancellationToken);
 
     public async Task<MutationResponseDto> TransferOrderAsync(string orderId, string targetTableId, CancellationToken cancellationToken = default)
@@ -278,6 +322,11 @@ public sealed class ApiClient
 
         return await ReadResponseAsync<T>(response, cancellationToken);
     }
+
+    private static KitchenCancelRequestDto? BuildKitchenCancelPayload(bool? printCancelToKitchen, string? cancelNote)
+        => printCancelToKitchen.HasValue || !string.IsNullOrWhiteSpace(cancelNote)
+            ? new KitchenCancelRequestDto(printCancelToKitchen, cancelNote)
+            : null;
 
     private async Task<HttpRequestMessage> BuildRequestAsync(HttpMethod method, string path, object? payload, bool authRequired)
     {
@@ -555,7 +604,9 @@ public sealed record OrderVersionDto(string OrderId, long Version, DateTime? Mod
 
 public sealed record AddOrderLineRequestDto(string ProductId, string ProductName, int Quantity, decimal UnitPrice, string? Note);
 
-public sealed record UpdateOrderLineRequestDto(int? Quantity, string? Note);
+public sealed record UpdateOrderLineRequestDto(int? Quantity, string? Note, bool? PrintCancelToKitchen = null, string? CancelNote = null);
+
+public sealed record KitchenCancelRequestDto(bool? PrintCancelToKitchen, string? CancelNote);
 
 public sealed record MutationResponseDto(bool Ok, string OrderId, decimal Total, DateTime? ModifiedAt, OrderVersionDto? Version, OrderDto? Order = null);
 

@@ -5,8 +5,8 @@ namespace BKPos.Mobile.App.Pages;
 internal sealed class OrderLineEditPage : ContentPage
 {
     private readonly OrderLineCard _line;
-    private readonly Func<int, string, Task> _onSave;
-    private readonly Func<Task> _onDelete;
+    private readonly Func<int, string, KitchenCancelChoice, Task> _onSave;
+    private readonly Func<KitchenCancelChoice, Task> _onDelete;
     private readonly Entry _noteEntry;
     private readonly Entry _quantityEntry;
     private readonly Label _lineTotalLabel;
@@ -14,7 +14,10 @@ internal sealed class OrderLineEditPage : ContentPage
     private bool _isBusy;
     private bool _syncingQuantityText;
 
-    public OrderLineEditPage(OrderLineCard line, Func<int, string, Task> onSave, Func<Task> onDelete)
+    public OrderLineEditPage(
+        OrderLineCard line,
+        Func<int, string, KitchenCancelChoice, Task> onSave,
+        Func<KitchenCancelChoice, Task> onDelete)
     {
         _line = line;
         _onSave = onSave;
@@ -332,7 +335,13 @@ internal sealed class OrderLineEditPage : ContentPage
         try
         {
             CommitQuantityEntry();
-            await _onSave(_quantity, (_noteEntry.Text ?? string.Empty).Trim());
+            var cancelChoice = await AskKitchenCancelChoiceForQuantityChangeAsync();
+            if (cancelChoice == KitchenCancelChoice.CancelOperation)
+            {
+                return;
+            }
+
+            await _onSave(_quantity, (_noteEntry.Text ?? string.Empty).Trim(), cancelChoice);
             await Navigation.PopModalAsync();
         }
         catch (Exception ex)
@@ -361,7 +370,13 @@ internal sealed class OrderLineEditPage : ContentPage
         _isBusy = true;
         try
         {
-            await _onDelete();
+            var cancelChoice = await AskKitchenCancelChoiceForDeleteAsync();
+            if (cancelChoice == KitchenCancelChoice.CancelOperation)
+            {
+                return;
+            }
+
+            await _onDelete(cancelChoice);
             await Navigation.PopModalAsync();
         }
         catch (Exception ex)
@@ -372,5 +387,35 @@ internal sealed class OrderLineEditPage : ContentPage
         {
             _isBusy = false;
         }
+    }
+
+    private async Task<KitchenCancelChoice> AskKitchenCancelChoiceForQuantityChangeAsync()
+    {
+        var oldQuantity = _line.Source.Quantity;
+        var printedQuantity = Math.Max(0, _line.Source.KitchenPrintedQuantity);
+        if (_quantity >= oldQuantity || printedQuantity <= _quantity)
+        {
+            return KitchenCancelChoice.ContinueWithoutPrint;
+        }
+
+        var cancelledQuantity = Math.Min(oldQuantity - _quantity, printedQuantity - _quantity);
+        return await AppUi.AskKitchenCancelChoiceAsync(
+            this,
+            "In món hủy xuống bếp?",
+            $"{_line.ProductName}: giảm {cancelledQuantity} món đã in bếp.");
+    }
+
+    private async Task<KitchenCancelChoice> AskKitchenCancelChoiceForDeleteAsync()
+    {
+        var printedQuantity = Math.Max(0, _line.Source.KitchenPrintedQuantity);
+        if (printedQuantity <= 0)
+        {
+            return KitchenCancelChoice.ContinueWithoutPrint;
+        }
+
+        return await AppUi.AskKitchenCancelChoiceAsync(
+            this,
+            "In món hủy xuống bếp?",
+            $"{_line.ProductName}: hủy {printedQuantity} món đã in bếp.");
     }
 }
