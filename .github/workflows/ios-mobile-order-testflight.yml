@@ -37,19 +37,19 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Select Xcode 26.5 toolchain
+      - name: Select Xcode 26.6 toolchain
         run: |
           set -euo pipefail
 
           SELECTED_DEVELOPER=""
-          for app in /Applications/Xcode_26.5_beta_2.app /Applications/Xcode_26.5.app /Applications/Xcode_26.5.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
+          for app in /Applications/Xcode_26.6_beta_*.app /Applications/Xcode_26.6.app /Applications/Xcode_26.6.0.app /Applications/Xcode.app /Applications/Xcode_*.app; do
             [ -d "$app" ] || continue
             developer="$app/Contents/Developer"
             [ -x "$developer/usr/bin/xcodebuild" ] || continue
             version="$(DEVELOPER_DIR="$developer" "$developer/usr/bin/xcodebuild" -version | head -n 1 || true)"
             macos_sdk="$developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
             echo "Candidate: $app -> $version"
-            if echo "$version" | grep -q "Xcode 26.5" \
+            if echo "$version" | grep -q "Xcode 26.6" \
               && [ -d "$macos_sdk" ] \
               && DEVELOPER_DIR="$developer" xcrun --sdk macosx --find clang >/dev/null 2>&1 \
               && DEVELOPER_DIR="$developer" xcrun --find ibtool >/dev/null 2>&1 \
@@ -60,7 +60,7 @@ jobs:
           done
 
           if [ -z "$SELECTED_DEVELOPER" ]; then
-            echo "Xcode 26.5 with clang, ibtool, actool and MacOSX.sdk is required but was not found."
+            echo "Xcode 26.6 with clang, ibtool, actool and MacOSX.sdk is required but was not found."
             ls -1 /Applications | grep -i Xcode || true
             exit 1
           fi
