@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 env:
-  DOTNET_VERSION: "10.0.x"
+  DOTNET_VERSION: "10.0.400"
+  DOTNET_WORKLOAD_VERSION: "10.0.400.1"
   PROJECT_PATH: "BKPos.Mobile.App/BKPos.Mobile.App.csproj"
   IPA_OUTPUT_DIR: "artifacts/ios-mobile-order"
 
@@ -36,6 +37,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Pin .NET SDK
+        run: |
+          cat > global.json <<JSON
+          { "sdk": { "version": "${DOTNET_VERSION}", "rollForward": "disable" } }
+          JSON
+          dotnet --version
 
       - name: Select Xcode 26.6 toolchain
         run: |
@@ -75,7 +83,7 @@ jobs:
           xcrun --find actool
 
       - name: Install MAUI iOS workload
-        run: dotnet workload install maui-ios
+        run: dotnet workload install maui-ios --version "${DOTNET_WORKLOAD_VERSION}"
 
       - name: Restore
         run: dotnet restore "${{ env.PROJECT_PATH }}" -p:RuntimeIdentifier=ios-arm64
